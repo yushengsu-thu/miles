@@ -37,7 +37,19 @@ from .model import forward_only, initialize_model_and_optimizer, save, train
 from .update_weight.common import named_params_and_buffers
 from .update_weight.update_weight_from_distributed import UpdateWeightFromDistributed
 from .update_weight.update_weight_from_tensor import UpdateWeightFromTensor
-
+##############################
+###########lora###############
+##############################
+from .lora_utils import (
+    is_lora_enabled,
+    is_lora_model,
+    # apply_lora_to_megatron_model,
+    # get_lora_weights_and_config,
+    freeze_base_model,
+)
+##############################
+##############################
+##############################
 logging.getLogger("megatron").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
@@ -92,6 +104,33 @@ class MegatronTrainRayActor(TrainRayActor):
             args, role
         )
 
+        ### share ref model
+        ##############################
+        ###########lora###############
+        ##############################
+        # # For LoRA with share-ref-base-model: backup base model weights BEFORE applying LoRA
+        # if is_lora_enabled(args) and role == "actor" and with_ref and getattr(args, 'share_ref_base_model', False):
+        #     # Create weights_backuper early to backup base weights as "ref" before LoRA
+        #     self.weights_backuper = TensorBackuper.create(
+        #         source_getter=lambda: named_params_and_buffers(
+        #             self.args,
+        #             self.model,
+        #             convert_to_global_name=args.megatron_to_hf_mode == "raw",
+        #             translate_gpu_to_cpu=not self.args.enable_weights_backuper,
+        #         ),
+        #         single_tag=None if args.enable_weights_backuper else "actor",
+        #     )
+        #     self.weights_backuper.backup("ref")  # Backup base weights as ref BEFORE LoRA
+        #     logger.info("Backed up base model weights as 'ref' before applying LoRA (share-ref-base-model mode)")
+
+        # if is_lora_enabled(args) and role == "actor":
+        #     self.model = apply_lora_to_megatron_model(self.model, args)
+        #     freeze_base_model(self.model)
+        ##############################
+        ##############################
+        ##############################
+
+        
         if role == "critic":
             if self.args.offload_train:
                 self.sleep()
@@ -108,12 +147,47 @@ class MegatronTrainRayActor(TrainRayActor):
             ),
             single_tag=None if args.enable_weights_backuper else "actor",
         )
+        # Deal with actor model --> delt with in model.py
+        # ##############################
+        # ###########lora###############
+        # ##############################
+        # if is_lora_enabled(args):
+        #     # self.weights_backuper.backup("ref") # Backup base weights as ref BEFORE LoRA (prevent load model weight again on later)
+
+        #     self.model = apply_lora_to_megatron_model(self.model, args) # model: base + lora including `requires_grad` process 
+        #     # freeze_base_model(self.model) # Set `requires_grad`: base + lora .. do not set here since self.weights_backuper.backup(...) does not process `requires_grad` 
+        # ##############################
+        # ##############################
+        # ##############################
         self._active_model_tag: str | None = "actor"
         self.weights_backuper.backup("actor")
 
-        if with_ref:
-            self.load_other_checkpoint("ref", args.ref_load)
 
+        if with_ref:
+            ##############################
+            ###########lora###############
+            ##############################     
+            # self.load_other_checkpoint("ref", args.ref_load)
+            
+            # if use lora: --ref-load /root/Qwen2.5-0.5B-Instruct_torch_dist/ (should be also lora weight)
+            if is_lora_enabled(args):
+                raise NotImplementedError(
+                    "LoRA with reference model is not yet fully implemented. "
+                    "Please remove reference model settings from your training script:\n"
+                    "  0. Might need to ensure  self.load_other_checkpoint can load loar module as well.\n"
+                    "  1. Remove '--use-kl-loss' flag, OR\n"
+                    "  2. Set '--kl-coef 0' without '--use-kl-loss', OR\n"
+                    "  3. Remove '--ref-load' parameter\n"
+                    "This will disable reference model loading (with_ref=False) and allow LoRA training to proceed."
+                )
+            else: 
+                self.load_other_checkpoint("ref", args.ref_load)
+
+            ##############################     
+            ##############################     
+            ##############################     
+
+        
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
             self.load_other_checkpoint("old_actor", args.load)
@@ -131,6 +205,13 @@ class MegatronTrainRayActor(TrainRayActor):
             weights_getter=lambda: self.weights_backuper.get("actor"),
             model_name=type(self.hf_config).__name__.lower() if self.args.model_name is None else self.args.model_name,
             quantization_config=getattr(self.hf_config, "quantization_config", None),
+            ##############################
+            ###########lora###############
+            ##############################
+            is_lora=is_lora_enabled(args),
+            ##############################
+            ##############################
+            ##############################
         )
 
         # empty cache after initialization
@@ -247,6 +328,18 @@ class MegatronTrainRayActor(TrainRayActor):
             raise ValueError(f"Cannot switch to unknown model tag: {target_tag}")
         self.weights_backuper.restore(target_tag)
         self._active_model_tag = target_tag
+
+        ##############################
+        ###########lora###############
+        ##############################
+        # Restore requires_grad after weight restoration
+        # For LoRA training: only adapter params should be trainable, base model frozen
+        if is_lora_enabled(self.args):
+            freeze_base_model(self.model)
+            # Note: ref model uses forward_only (@torch.no_grad), so requires_grad doesn't matter
+        ##############################
+        ##############################
+        ##############################
 
     def fill_routing_replay(self, data_iterator, num_microbatches, rollout_data):
         if "rollout_routed_experts" not in rollout_data:

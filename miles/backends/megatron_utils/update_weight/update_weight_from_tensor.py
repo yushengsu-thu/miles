@@ -36,6 +36,13 @@ class UpdateWeightFromTensor:
         *,
         model_name: str,
         quantization_config: dict[str, int | str | list[str]] | None,
+        ##############################
+        ###########lora###############
+        ##############################
+        is_lora: bool = False,
+        ##############################
+        ##############################
+        ##############################
     ) -> None:
         """
         Compute param buckets, create IPC Gloo groups (rollout_num_gpus_per_engine ranks/group).
@@ -46,11 +53,26 @@ class UpdateWeightFromTensor:
         self.model_name = model_name
         self.quantization_config = quantization_config
         self.weight_version = 0
+        ##############################
+        ###########lora###############
+        ##############################
+        self.is_lora = is_lora
+        self._lora_loaded = False
+        self._base_synced = False
 
+        # self._hf_weight_iterator = HfWeightIteratorBase.create(
+        #     args=args, model=model, model_name=model_name, quantization_config=quantization_config
+        # )
         self._hf_weight_iterator = HfWeightIteratorBase.create(
-            args=args, model=model, model_name=model_name, quantization_config=quantization_config
+            args=args, model=model, model_name=model_name, quantization_config=quantization_config,
+            # is_lora=self.is_lora,
+            _base_synced=self._base_synced, 
         )
+        ##############################
+        ##############################
+        ##############################
 
+    
         # create the group within megatron.
         for start_rank in range(0, dist.get_world_size(), self.args.rollout_num_gpus_per_engine):
             end_rank = start_rank + self.args.rollout_num_gpus_per_engine
@@ -61,6 +83,7 @@ class UpdateWeightFromTensor:
                 self._ipc_gather_src = start_rank
 
         self._model_update_groups = None
+
 
     def connect_rollout_engines(
         self, rollout_engines: Sequence[ActorHandle], rollout_engine_lock: ActorHandle

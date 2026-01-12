@@ -20,26 +20,47 @@ source "${SCRIPT_DIR}/../../scripts/models/qwen2.5-0.5B.sh"
 
 CKPT_ARGS=(
    --hf-checkpoint /root/Qwen2.5-0.5B-Instruct/
-   --ref-load /root/Qwen2.5-0.5B-Instruct_torch_dist/
+   # --ref-load /root/Qwen2.5-0.5B-Instruct_torch_dist/
    # Uncomment to save checkpoints (required for LoRA)
    --save /root/checkpoints/qwen2.5-0.5B-lora-megatron/
    --save-interval 5
 )
 
+
+##############################
+###########lora###############
+##############################
 LORA_ARGS=(
    --lora-rank 16                    # LoRA rank (typical values: 8, 16, 32, 64)
    --lora-alpha 32                   # LoRA alpha (usually 2x rank)
    --lora-dropout 0.0                # LoRA dropout (0.0 for RL training)
    # Target modules - use Megatron naming or HF naming
    # Megatron: linear_qkv, linear_proj, linear_fc1, linear_fc2
-   # HF: q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj
-   # --target-modules "all-linear"
-   --target-modules "q_proj,k_proj,v_proj,o_proj"
-   # --target-modules "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
+   --target-modules "all-linear"
+   # Need this PR: Update LoRA Weights via Tensor sgl-project/sglang#16226
    # --lora-sync-from-tensor           # Use tensor-based sync (more efficient)
-   # Uncomment to share base model between actor and ref (saves memory)
-   --share-ref-base-model
+   ## Uncomment to share base model between actor and ref (saves memory)
+   # --share-ref-base-model
+   ##############################
+   ##############################
+   # # Debug
+   # --debug-rollout-only
+   --debug-train-only
+   --load-debug-rollout-data /root/debug_data/rollout_data.pt
+   # # --save-debug-rollout-data /root/debug_data/rollout_data.pt
+   ##############################
+   ##############################
+   # --no-use-distributed-optimizer  # if open it will has error: /home/radixark/yushengsu/miles-pr/miles/miles/utils/arguments.py: 
+   #def set_default_megatron_args(args): (error) # optimizer cannot distributed to other gpus (enable)
+
+   --megatron-to-hf-mode bridge
+   # Disable gradient accumulation fusion for LoRA training
+
+   # --no-gradient-accumulation-fusion #Root cause: When training with LoRA, the base model’s parameters are frozen (requires_grad=False). However, Megatron-LM’s tensor-parallel layers use gradient-accumulation fusion during the backward pass, and that fusion path checks weight.main_grad.dtype. For frozen parameters, main_grad is never allocated (it remains None), which triggers the error. (enable)
 )
+##############################
+##############################
+##############################
 
 ROLLOUT_ARGS=(
    --prompt-data /root/gsm8k/train.parquet
@@ -68,7 +89,7 @@ EVAL_ARGS=(
 
 PERF_ARGS=(
    --tensor-model-parallel-size 1
-   --sequence-parallel
+   --sequence-parallel #becasue of lora training error: RuntimeError: Cannot access the main gradient of a frozen parameter. main_grad is None. (enable)
    --pipeline-model-parallel-size 1
    --context-parallel-size 1
    --expert-model-parallel-size 1
@@ -80,7 +101,7 @@ PERF_ARGS=(
 
 GRPO_ARGS=(
    --advantage-estimator grpo
-   --use-kl-loss
+   # --use-kl-loss # if use kl loss, should use --ref-load
    --kl-loss-coef 0.00
    --kl-loss-type low_var_kl
    --kl-coef 0.00
@@ -128,8 +149,18 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
+
+##############################
+###########lora###############
+##############################
+export GPUS_PER_NODE=1
+##############################
+##############################
+##############################
+
 # launch the master node of ray in container
-ray start --head --node-ip-address 127.0.0.1 --num-gpus 8 --disable-usage-stats
+ray start --head --node-ip-address 127.0.0.1 --num-gpus $GPUS_PER_NODE --disable-usage-stats
+# ray start --head --node-ip-address 127.0.0.1 --num-gpus 1 --disable-usage-stats
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json='{
@@ -143,18 +174,19 @@ ray job submit --address="http://127.0.0.1:8265" \
    }' \
    -- python3 train.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 8 \
+   --actor-num-gpus-per-node $GPUS_PER_NODE \
    --colocate \
    --calculate-per-token-loss \
    --use-miles-router \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
    ${LORA_ARGS[@]} \
-   ${ROLLOUT_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
    ${GRPO_ARGS[@]} \
    ${WANDB_ARGS[@]} \
    ${PERF_ARGS[@]} \
    ${EVAL_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
-   ${MISC_ARGS[@]}
+   ${MISC_ARGS[@]} \
+   ${ROLLOUT_ARGS[@]} \
+   ${LORA_ARGS[@]} 

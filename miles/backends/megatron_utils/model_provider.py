@@ -79,6 +79,13 @@ def get_model_provider_func(
 
     if args.megatron_to_hf_mode == "bridge":
         from megatron.bridge import AutoBridge
+        ##############################
+        ###########lora###############
+        ##############################
+        from miles.backends.megatron_utils.lora_utils import is_lora_enabled
+        ##############################
+        ##############################
+        ##############################
 
         bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
         provider = bridge.to_megatron_provider(load_weights=False)
@@ -88,6 +95,42 @@ def get_model_provider_func(
         provider.expert_model_parallel_size = args.expert_model_parallel_size
         provider.expert_tensor_parallel_size = args.expert_tensor_parallel_size
         provider.sequence_parallel = args.sequence_parallel
+        ##############################
+        ###########lora###############
+        ############################## 
+        # Register LoRA pre_wrap_hook（before setting up DDP）
+        if is_lora_enabled(args) and role == "actor":
+            def lora_pre_wrap_hook(model):
+                """Apply LoRA to model BEFORE DDP wrapping."""
+                from megatron.bridge.peft.lora import LoRA
+                import torch
+                
+                # Set up lora_dtype
+                if hasattr(args, 'bf16') and args.bf16:
+                    lora_dtype = torch.bfloat16
+                elif hasattr(args, 'fp16') and args.fp16:
+                    lora_dtype = torch.float16
+                else:
+                    lora_dtype = None
+                
+                lora = LoRA(
+                    target_modules=args.target_modules,
+                    dim=args.lora_rank,
+                    alpha=args.lora_alpha,
+                    dropout=args.lora_dropout,
+                    lora_dtype=lora_dtype,
+                )
+                
+                # Apply LoRA and freeze base model
+                transformed_model = lora(model, training=True)
+                lora.set_params_to_save(transformed_model)
+                
+                return transformed_model
+            
+            provider.register_pre_wrap_hook(lora_pre_wrap_hook)
+        ##############################
+        ##############################
+        ##############################
         provider.finalize()
         return provider.provide
 

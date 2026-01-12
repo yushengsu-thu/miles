@@ -25,7 +25,16 @@ from megatron.training.training import get_model
 from miles.utils import tracking_utils
 from miles.utils.memory_utils import clear_memory
 
-from .checkpoint import load_checkpoint, save_checkpoint
+##############################
+###########lora###############
+##############################
+# from .checkpoint import load_checkpoint, save_checkpoint
+from .checkpoint import load_checkpoint, save_checkpoint, save_checkpoint_with_lora
+from .lora_utils import is_lora_model
+##############################
+##############################
+##############################
+
 from .data import DataIterator, get_batch
 from .loss import loss_function
 from .model_provider import get_model_provider_func
@@ -106,6 +115,16 @@ def setup_model_and_optimizer(
     assert args.load is not None or args.pretrained_checkpoint is not None
 
     model = get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
+
+    ##############################
+    ###########lora###############
+    ##############################
+    # from miles.backends.megatron_utils.lora_utils import is_lora_enabled, apply_lora_to_megatron_model
+    # if is_lora_enabled(args) and role == "actor":
+    #     model = apply_lora_to_megatron_model(model, args)
+    ##############################
+    ##############################
+    ##############################
 
     # Optimizer
     kwargs = {}
@@ -703,16 +722,44 @@ def save(
     args = get_args()
     if should_disable_forward_pre_hook(args):
         disable_forward_pre_hook(model)
-    save_checkpoint(
-        iteration,
-        model,
-        optimizer,
-        opt_param_scheduler,
-        num_floating_point_operations_so_far=0,
-        checkpointing_context=None,
-        train_data_iterator=None,
-        preprocess_common_state_dict_fn=None,
-    )
+
+    ##############################
+    ###########lora###############
+    ##############################
+    # save_checkpoint(
+    #     iteration,
+    #     model,
+    #     optimizer,
+    #     opt_param_scheduler,
+    #     num_floating_point_operations_so_far=0,
+    #     checkpointing_context=None,
+    #     train_data_iterator=None,
+    #     preprocess_common_state_dict_fn=None,
+    # )
+
+    if is_lora_model(model):
+            save_checkpoint_with_lora(
+            iteration,
+            model,
+            optimizer,
+            opt_param_scheduler,
+        )
+    else:
+        save_checkpoint(
+            iteration,
+            model,
+            optimizer,
+            opt_param_scheduler,
+            num_floating_point_operations_so_far=0,
+            checkpointing_context=None,
+            train_data_iterator=None,
+            preprocess_common_state_dict_fn=None,
+        ) 
+
+    ##############################
+    ##############################
+    ##############################
+
     if should_disable_forward_pre_hook(args):
         enable_forward_pre_hook(model)
 

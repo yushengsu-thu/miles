@@ -14,11 +14,20 @@ class HfWeightIteratorBase(ABC):
 
         return c(args, model, **kwargs)
 
-    def __init__(self, args, model, model_name, quantization_config):
+    # def __init__(self, args, model, model_name, quantization_config):
+    def __init__(self, args, model, model_name, quantization_config, **kwargs):
         self.args = args
         self.model = model
         self.model_name = model_name
         self.quantization_config = quantization_config
+        ##############################
+        ###########lora###############
+        ##############################
+        self.is_lora = kwargs.pop('is_lora', False)
+        self._base_synced = kwargs.pop('_base_synced', False)
+        ##############################
+        ##############################
+        ##############################
 
     @abstractmethod
     def get_hf_weight_chunks(self, megatron_local_weights):

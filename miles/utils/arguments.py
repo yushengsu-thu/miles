@@ -911,6 +911,74 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 help="The threshold for Off-Policy Sequence Masking (OPSM).",
             )
             return parser
+        
+        ##############################
+        ###########lora###############
+        ##############################
+        def add_lora_arguments(parser):
+            """Add LoRA-related arguments for Megatron backend."""
+            parser.add_argument(
+                "--lora-rank",
+                type=int,
+                default=0,
+                help="LoRA rank. Set to 0 to disable LoRA (default: 0)",
+            )
+            parser.add_argument(
+                "--lora-alpha",
+                type=int,
+                default=16,
+                help="LoRA alpha for scaling (default: 16)",
+            )
+            parser.add_argument(
+                "--lora-dropout",
+                type=float,
+                default=0.0,
+                help="LoRA dropout rate (default: 0.0)",
+            )
+            parser.add_argument(
+                "--target-modules",
+                type=str,
+                default=None,
+                help="Target modules for LoRA. Use 'all-linear' or comma-separated module names "
+                "(e.g., 'q_proj,k_proj,v_proj,o_proj' for HF naming or 'linear_qkv,linear_proj' for Megatron naming)",
+            )
+            parser.add_argument(
+                "--exclude-modules",
+                type=str,
+                default=None,
+                help="Modules to exclude from LoRA (comma-separated)",
+            )
+            parser.add_argument(
+                "--lora-adapter-path",
+                type=str,
+                default=None,
+                help="Path to pre-trained LoRA adapter to load",
+            )
+            parser.add_argument(
+                "--lora-sync-from-tensor",
+                action="store_true",
+                default=False,
+                help="Sync LoRA weights via tensor instead of file (more efficient)",
+            )
+            # parser.add_argument(
+            #     "--share-ref-base-model",
+            #     action="store_true",
+            #     default=False,
+            #     help="Share base model between actor and reference model (saves memory for LoRA)",
+            # )
+
+            parser.add_argument(
+                "--no-use-distributed-optimizer",
+                action="store_false",
+                default=True,
+                dest="Use distributed optimizer (ZeRO)",
+                help="Use distributed optimizer (ZeRO). Disable for LoRA training. (default: True)",
+            )
+            
+            return parser
+        ##############################
+        ##############################
+        ##############################
 
         def add_router_arguments(parser):
             parser.add_argument(
@@ -1352,6 +1420,13 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
         parser = add_data_arguments(parser)
         parser = add_eval_arguments(parser)
         parser = add_algo_arguments(parser)
+        ##############################
+        ###########lora###############
+        ##############################
+        parser = add_lora_arguments(parser)
+        ##############################
+        ##############################
+        ##############################
         parser = add_wandb_arguments(parser)
         parser = add_tensorboard_arguments(parser)
         parser = add_router_arguments(parser)
@@ -1651,6 +1726,34 @@ def miles_validate_args(args):
 
     if args.enable_mtp_training:
         assert args.mtp_num_layers, "mtp_num_layers must be set when enable_mtp_training is set"
+
+    ##############################
+    ###########lora###############
+    ##############################
+    ### considert move these to megatron arguments.py
+    if args.lora_rank > 0:
+        assert args.save is not None, "'--save' is required when LoRA is enabled."
+        assert args.target_modules is not None, "'--target-modules' is required when LoRA is enabled."
+        
+        # Parse target modules
+        if args.target_modules == "all-linear":
+            # to-do: need to check both on megatron and sglang side support modules and names
+            # Megatron module names
+            modules = ["linear_qkv", "linear_proj", "linear_fc1", "linear_fc2"]
+        elif "," in args.target_modules:
+            modules = [m.strip() for m in args.target_modules.split(",")]
+        else:
+            modules = [args.target_modules]
+        
+        # Handle excluded modules
+        if args.exclude_modules:
+            exclude_set = set(m.strip() for m in args.exclude_modules.split(","))
+            modules = [m for m in modules if m not in exclude_set]
+        
+        args.target_modules = modules
+    ##############################
+    ##############################
+    ##############################
 
     if args.use_rollout_routing_replay:
         args.use_routing_replay = True
