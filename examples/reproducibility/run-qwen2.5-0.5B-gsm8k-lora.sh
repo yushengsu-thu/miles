@@ -22,8 +22,10 @@ CKPT_ARGS=(
    --hf-checkpoint /root/Qwen2.5-0.5B-Instruct/
    # --ref-load /root/Qwen2.5-0.5B-Instruct_torch_dist/
    # Uncomment to save checkpoints (required for LoRA)
+   #### train
    --save /root/checkpoints/qwen2.5-0.5B-lora-megatron/
    --save-interval 5
+   ###
 )
 
 
@@ -36,18 +38,31 @@ LORA_ARGS=(
    --lora-dropout 0.0                # LoRA dropout (0.0 for RL training)
    # Target modules - use Megatron naming or HF naming
    # Megatron: linear_qkv, linear_proj, linear_fc1, linear_fc2
-   --target-modules "all-linear"
    # Need this PR: Update LoRA Weights via Tensor sgl-project/sglang#16226
    # --lora-sync-from-tensor           # Use tensor-based sync (more efficient)
-   ## Uncomment to share base model between actor and ref (saves memory)
+   # # Uncomment to share base model between actor and ref (saves memory)
    # --share-ref-base-model
+
+   --target-modules "all-linear"
+   # --target-modules "o_proj,down_proj,k_proj,gate_proj,q_proj,v_proj,up_proj"
+   # --target-modules "q_proj,k_proj,v_proj,o_proj"
    ##############################
    ##############################
    # # Debug
-   # --debug-rollout-only
-   --debug-train-only
-   --load-debug-rollout-data /root/debug_data/rollout_data.pt
-   # # --save-debug-rollout-data /root/debug_data/rollout_data.pt
+   #### inference
+   --debug-rollout-only
+   ### --lora-adapter-path /root/checkpoints/qwen2.5-0.5B-lora-megatron/lora_adapter.pt
+   --lora-adapter-path lewtun/Qwen2.5-0.5B-SFT-LoRA
+   # --lora-adapter-path /root/checkpoints/qwen2.5-0.5B-lora-megatron/
+   ###
+
+   #### train
+   # --debug-train-only
+   # --load-debug-rollout-data /root/debug_data/rollout_data.pt
+   ## --save /root/checkpoints/qwen2.5-0.5B-lora-megatron/
+
+   # --save-debug-rollout-data /root/debug_data/rollout_data.pt
+   ###
    ##############################
    ##############################
    # --no-use-distributed-optimizer  # if open it will has error: /home/radixark/yushengsu/miles-pr/miles/miles/utils/arguments.py: 
@@ -153,7 +168,7 @@ MISC_ARGS=(
 ##############################
 ###########lora###############
 ##############################
-export GPUS_PER_NODE=1
+export GPUS_PER_NODE=2
 ##############################
 ##############################
 ##############################
@@ -190,3 +205,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${MISC_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
    ${LORA_ARGS[@]} 
+
+
+# colocate : update from tesnor
+# disaggrate : update from distributed

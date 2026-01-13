@@ -32,6 +32,13 @@ def convert_target_modules_to_hf(megatron_modules: list[str]) -> list[str]:
     Megatron: linear_qkv, linear_proj, linear_fc1, linear_fc2
     HF: q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj
     """
+
+    # If "all-linear" was converted to the standard Megatron list, just return "all"
+    # This allows SGLang to accept any LoRA adapter regardless of its target modules
+    # standard_all_linear = ["linear_qkv", "linear_proj", "linear_fc1", "linear_fc2"]
+    # if set(megatron_modules) == set(standard_all_linear):
+    #     return "all"
+    
     # This mapping should match your specific model architecture
     replacements = {
         "linear_qkv": ["q_proj", "k_proj", "v_proj"],
@@ -96,10 +103,14 @@ def launch_server_process(server_args: ServerArgs) -> multiprocessing.Process:
     ##############################
     ###########lora###############
     ##############################
+    # for debugging - can be removed
     # Add logging to see what args are being passed
-    logger.info(f"Launching SGLang server with args: enable_lora={getattr(server_args, 'enable_lora', None)}, "
-                f"max_lora_rank={getattr(server_args, 'max_lora_rank', None)}, "
-                f"base_gpu_id={server_args.base_gpu_id}")
+    logger.info(f"Launching SGLang server with args:")
+    logger.info(f"  enable_lora={getattr(server_args, 'enable_lora', None)}")
+    logger.info(f"  max_lora_rank={getattr(server_args, 'max_lora_rank', None)}")
+    logger.info(f"  max_loras_per_batch={getattr(server_args, 'max_loras_per_batch', None)}")
+    logger.info(f"  lora_target_modules={getattr(server_args, 'lora_target_modules', None)}")
+    logger.info(f"  base_gpu_id={server_args.base_gpu_id}")
     ##############################
     ##############################
     ##############################
@@ -592,15 +603,41 @@ def _compute_server_args(
     ##############################
     ###########lora###############
     ##############################
-    if is_lora_enabled(args):
+    # if is_lora_enabled(args):
+    #     kwargs["enable_lora"] = True
+    #     kwargs["max_lora_rank"] = args.lora_rank
+    #     kwargs["max_loras_per_batch"] = 1
+    #     # NOTE: lora_target_modules might not be supported by your SGLang version
+    #     # Comment out this line if SGLang doesn't support it:
+    #     # kwargs["lora_target_modules"] = convert_target_modules_to_hf(args.target_modules)
+    #     # Log for debugging
+    #     kwargs["lora_target_modules"] = convert_target_modules_to_hf(args.target_modules)
+    #     # kwargs["lora_target_modules_list"] = convert_target_modules_to_hf(args.target_modules)
+    #     # print(1111111111)
+    #     # print(kwargs["lora_target_modules"])
+    #     # print(2222222222)
+    #     # exit()
+
+    if args.lora_rank > 0 or args.lora_adapter_path is not None:
+        kwargs["max_loras_per_batch"] = 1  #!!!!!!!!
         kwargs["enable_lora"] = True
-        kwargs["max_lora_rank"] = args.lora_rank
-        kwargs["max_loras_per_batch"] = 1
-        # NOTE: lora_target_modules might not be supported by your SGLang version
-        # Comment out this line if SGLang doesn't support it:
-        # kwargs["lora_target_modules"] = convert_target_modules_to_hf(args.target_modules)
-        # Log for debugging
+        # kwargs["max_lora_rank"] = args.lora_rank
+        # Ensure a valid positive LoRA rank is passed to the SGLang engine.
+        # If LoRA is enabled via adapter path but lora_rank is not set to a
+        # positive value, default to rank 1 to avoid an invalid configuration.
+        if getattr(args, "lora_rank", None) and args.lora_rank > 0:
+            max_lora_rank = args.lora_rank
+        else:
+            max_lora_rank = 1
+        kwargs["max_lora_rank"] = max_lora_rank
+        # kwargs["lora_target_modules"] = args.target_modules
         kwargs["lora_target_modules"] = convert_target_modules_to_hf(args.target_modules)
+
+        ##### For rollout debug mode to add:
+        if args.debug_rollout_only and args.lora_adapter_path:
+            from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
+            # SGLang lora_paths Format: {"adapter_name": "path_to_adapter"}
+            kwargs["lora_paths"] = {LORA_ADAPTER_NAME: args.lora_adapter_path}
     ##############################
     ##############################
     ##############################
@@ -612,6 +649,7 @@ def _compute_server_args(
         if hasattr(args, f"sglang_{attr.name}") and attr.name not in kwargs:
             kwargs[attr.name] = getattr(args, f"sglang_{attr.name}")
         unused_keys.discard(attr.name)
+
 
     # for compatibility with old args
     if len(unused_keys) > 0:

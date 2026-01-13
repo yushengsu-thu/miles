@@ -246,10 +246,6 @@ def setup_model_and_optimizer(
         if hasattr(args, '_lora_instance'):
             args._lora_instance = lora
 
-        # print(11111111)
-        # print(model)
-        # print(11111111)
-        # exit()
     else:
         # Original non-LoRA path or non-bridge mode
         model = get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)

@@ -1609,6 +1609,33 @@ def miles_validate_args(args):
     if args.save_interval is not None:
         assert args.save is not None, "'--save' is required when save_interval is set."
 
+    ##############################
+    ###########lora###############
+    ##############################
+    if args.lora_rank > 0:
+        assert args.save is not None, "'--save' is required when LoRA is enabled."
+        assert args.target_modules is not None, "'--target-modules' is required when LoRA is enabled."
+
+        if args.target_modules == "all-linear":
+            modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        elif "," in args.target_modules:
+            modules = [m.strip() for m in args.target_modules.split(",")]
+        else:
+            modules = [args.target_modules]
+
+        if args.exclude_modules:
+            exclude_set = (
+                set(m.strip() for m in args.exclude_modules.split(","))
+                if "," in args.exclude_modules
+                else {args.exclude_modules}
+            )
+            modules = [m for m in modules if m not in exclude_set]
+
+        args.target_modules = modules
+    ##############################
+    ##############################
+    ##############################
+    
     assert not (args.kl_coef != 0 and args.kl_loss_coef != 0), "Only one of kl_coef and kl_loss_coef can be set"
 
     if args.advantage_estimator in ["reinforce_plus_plus", "reinforce_plus_plus_baseline"]:
@@ -1744,34 +1771,6 @@ def miles_validate_args(args):
 
     if args.enable_mtp_training:
         assert args.mtp_num_layers, "mtp_num_layers must be set when enable_mtp_training is set"
-
-    ##############################
-    ###########lora###############
-    ##############################
-    ### considert move these to megatron arguments.py
-    if args.lora_rank > 0:
-        assert args.save is not None, "'--save' is required when LoRA is enabled."
-        assert args.target_modules is not None, "'--target-modules' is required when LoRA is enabled."
-        
-        # Parse target modules
-        if args.target_modules == "all-linear":
-            # to-do: need to check both on megatron and sglang side support modules and names
-            # Megatron module names
-            modules = ["linear_qkv", "linear_proj", "linear_fc1", "linear_fc2"]
-        elif "," in args.target_modules:
-            modules = [m.strip() for m in args.target_modules.split(",")]
-        else:
-            modules = [args.target_modules]
-        
-        # Handle excluded modules
-        if args.exclude_modules:
-            exclude_set = set(m.strip() for m in args.exclude_modules.split(","))
-            modules = [m for m in modules if m not in exclude_set]
-        
-        args.target_modules = modules
-    ##############################
-    ##############################
-    ##############################
 
     if args.use_rollout_routing_replay:
         args.use_routing_replay = True

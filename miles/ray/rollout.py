@@ -145,7 +145,6 @@ class RolloutManager:
                 if engine is not None
             ]
         )
-
         
     def health_monitoring_pause(self):
         if self.args.use_fault_tolerance and hasattr(self, '_health_monitor'):
@@ -154,11 +153,9 @@ class RolloutManager:
     def health_monitoring_resume(self):
         if self.args.use_fault_tolerance and hasattr(self, '_health_monitor'):
             self._health_monitor.start()
-        
     ############################## 
     ############################## 
     ############################## 
-
 
 
     def onload(self, tags: list[str] = None):
@@ -486,6 +483,23 @@ def init_rollout_engines(args, pg, all_rollout_engines):
     # somehow if we don't sync here, the --debug-rollout-only mode will crash.
     init_handles = [engine.init.remote(**(addr_and_ports[rank])) for rank, engine in rollout_engines]
     ray.get(init_handles)
+
+    # ##############################
+    # ###########lora###############
+    # ##############################
+    # # Load LoRA adapter from disk in debug-rollout-only mode
+    # if args.debug_rollout_only and args.lora_adapter_path:
+    #     from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
+    #     logger.info(f"Loading LoRA adapter from {args.lora_adapter_path} for debug-rollout-only mode")
+    #     for i, engine in rollout_engines:
+    #         ray.get(engine.load_lora_adapter.remote(
+    #             lora_name=LORA_ADAPTER_NAME,
+    #             lora_path=args.lora_adapter_path
+    #         ))
+    #     logger.info("LoRA adapter loaded successfully")
+    # ##############################
+    # ##############################
+    # ##############################
 
     return num_new_engines
 
