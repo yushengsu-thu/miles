@@ -45,24 +45,7 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
     def get_hf_weight_chunks(self, megatron_local_weights):
         # TODO support quantization (e.g. modify megatron-bridge to provide megatron param name)
         renamed_megatron_local_weights = {strip_param_name_prefix(k): v for k, v in megatron_local_weights.items()}
-        # print(111111)
-        # print(renamed_megatron_local_weights)
-        # print(type(renamed_megatron_local_weights))
-        # print(renamed_megatron_local_weights["vp_stages.0.decoder.layers.23.mlp.linear_fc2.adapter.linear_out.weight"])
-        # print(renamed_megatron_local_weights["vp_stages.0.decoder.layers.21.mlp.linear_fc2.to_wrap.weight"])
-        # print(111111)
 
-        # lora_weights = self._bridge.export_adapter_weights(
-        #         self.model,
-        #         # cpu=False,
-        #         cpu=True, ### if False, it will have the problem - why?
-        #         # conversion_tasks=conversion_tasks, #### 
-        #         show_progress=False
-        #     )
-        # # print("---")
-        # # for i in lora_weights:
-        #     # print(i) 
-        # exit()
 
         with megatron_bridge_utils.patch_megatron_model(self.model):
             ##############################
@@ -153,60 +136,13 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
                 # conversion_tasks = self._bridge.get_conversion_tasks(self.model)
                 # conversion_tasks = _process_conversion_tasks(conversion_tasks, renamed_megatron_local_weights) 
 
-                # print(333333)
-                # print(self.model)
-                # print(333333)
-                # exit()
-                # conversion_tasks = self._bridge.get_conversion_tasks(self.model)
-                # conversion_tasks = self._bridge.build_adapter_conversion_tasks(self.model)
-                # conversion_tasks = _process_conversion_tasks(conversion_tasks, renamed_megatron_local_weights) 
-                # print(999999)
-                # print(conversion_tasks)
-                # print(999999)
-                # exit()
-                
-
-                ###
-                # conversion_tasks = self._bridge.get_conversion_tasks(self.model)
-                # conversion_tasks = _process_conversion_tasks(conversion_tasks, renamed_megatron_local_weights)
-                # lora_weights = self._bridge.export_hf_weights(
-                #     self.model, 
-                #     cpu=False, 
-                #     conversion_tasks=conversion_tasks,
-                #     merge_adapter_weights=not self.is_lora, # Do not return merged (base.weight + lora.weight). 
-                # )
-                ###
-                
-                # self.model --> eval mode () ##
-                # problem in self._bridge.export_adapter_weights() # verl do the same thing 
-                # print(self.model) --> self.model is a list 
-                # for model_module in self.model:
-                #     print(model_module, "training:", model_module.training)
-                #     model_module.eval()
-                #     print(model_module, "training:", model_module.training)
-                # print("0099")
-                # print(self.model)
-               
-                # print(self.model) 
-                # print("---------")
                 lora_weights = self._bridge.export_adapter_weights(
                     self.model,
-                    # cpu=False,
-                    cpu=True, ### if False, it will have the problem - why?
+                    cpu=False,
+                    # cpu=True, ### if False, it will have the problem - why?
                     # conversion_tasks=conversion_tasks, #### 
                     show_progress=False
                 )
-
-                # print(self.model) 
-                # exit()
-                # for model_module in self.model:
-                    # model_module.train()
-                
-                # for item in lora_weights:
-                #     # print(i) 
-                #     # print(f"param_name: {item.param_name}, shape: {item[1].shape}, dtype: {item[1].dtype}")
-                #     hf_param_name, weight, megatron_param_name = item
-                    
 
                 # hf_param_name's might have big problem  
                 lora_weights = (

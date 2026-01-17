@@ -160,75 +160,6 @@ class UpdateWeightFromTensor:
         dist.barrier(group=get_gloo_group())
 
 
-    # ##############################
-    # ###########lora###############
-    # ##############################
-    # def _update_lora_via_tensor(self) -> None:
-    #     """Push LoRA weights to rollout engines using tensors."""
-    #     lora_weights, config_dict = get_lora_weights_and_config(self.model)
-    #     dist.barrier()
-
-    #     if dist.get_rank() == 0:
-    #         serialized_tensors = MultiprocessingSerializer.serialize(lora_weights, output_str=True)
-
-    #         if self._lora_loaded:
-    #             refs = [engine.unload_lora_adapter.remote(LORA_ADAPTER_NAME) for engine in self.rollout_engines]
-    #             ray.get(refs)
-
-    #         refs = [
-    #             engine.load_lora_adapter_from_tensors.remote(LORA_ADAPTER_NAME, serialized_tensors, config_dict)
-    #             for engine in self.rollout_engines
-    #         ]
-    #         ray.get(refs)
-
-    #         refs = [engine.flush_cache.remote() for engine in self.rollout_engines]
-    #         ray.get(refs)
-
-    #         self._lora_loaded = True
-
-    #     dist.barrier()
-    
-    
-    
-    # # _update_lora_via_file -- have not done/fix yet  
-    # def _update_lora_via_file(self) -> None:
-    #     """Push LoRA weights to rollout engines using disk files."""
-    #     self._lora_save_dir = os.path.join(self.args.save, LORA_SUBDIR)
-    #     if dist.get_rank() == 0:
-    #         if os.path.exists(self._lora_save_dir):
-    #             delete_lora_from_disk(self._lora_save_dir)
-
-    #     dist.barrier()
-
-    #     save_lora_to_disk(self.model, self._lora_save_dir)
-
-    #     dist.barrier()
-
-    #     if dist.get_rank() == 0:
-    #         if self._lora_loaded:
-    #             refs = [engine.unload_lora_adapter.remote(LORA_ADAPTER_NAME) for engine in self.rollout_engines]
-    #             ray.get(refs)
-
-    #         refs = [engine.flush_cache.remote() for engine in self.rollout_engines]
-    #         ray.get(refs)
-
-    #         refs = [
-    #             engine.load_lora_adapter.remote(LORA_ADAPTER_NAME, self._lora_save_dir)
-    #             for engine in self.rollout_engines
-    #         ]
-    #         ray.get(refs)
-
-    #         refs = [engine.flush_cache.remote() for engine in self.rollout_engines]
-    #         ray.get(refs)
-
-    #         self._lora_loaded = True
-
-    #     dist.barrier()
-
-    # ##############################
-    # ##############################
-    # ##############################
-    
 
     def _send_hf_params(self, hf_named_tensors) -> tuple[list[ObjectRef], Any]:
         
@@ -236,12 +167,11 @@ class UpdateWeightFromTensor:
         ###########lora###############
         ##############################
 
-        # to-do (yusheng): need to deal with update_from_disk or tensor in this function
+        # to-do (yusheng): need to deal with lora update_from_tensor in sglang
 
         ##############################
         ##############################
         ############################## 
-        
         
         
         all_refs = []
