@@ -162,7 +162,7 @@ def execute_train(
                 "https_proxy": "",
                 "HTTP_PROXY": "",
                 "HTTPS_PROXY": "",
-                "RAY_ADDRESS": "",  # Clear to use default Ray connection
+                "RAY_ADDRESS": "127.0.0.1:6379",  # Clear to use default Ray connection
                 **(
                     {
                         "CUDA_ENABLE_COREDUMP_ON_EXCEPTION": "1",
