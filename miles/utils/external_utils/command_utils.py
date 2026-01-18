@@ -139,6 +139,7 @@ def execute_train(
         )
         # Wait for Ray to be fully initialized
         time.sleep(5)
+        exec_command("ray status") 
 
     if (f := before_ray_job_submit) is not None:
         f()
