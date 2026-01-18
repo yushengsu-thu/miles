@@ -58,12 +58,6 @@ jobs:
       MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
 
     steps:
-      - name: Clear proxy settings
-        run: |
-          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          git config --global --unset http.proxy || true
-          git config --global --unset https.proxy || true
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -108,12 +102,6 @@ jobs:
       MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
 
     steps:
-      - name: Clear proxy settings
-        run: |
-          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          git config --global --unset http.proxy || true
-          git config --global --unset https.proxy || true
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -158,12 +146,6 @@ jobs:
       MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
 
     steps:
-      - name: Clear proxy settings
-        run: |
-          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          git config --global --unset http.proxy || true
-          git config --global --unset https.proxy || true
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -208,12 +190,6 @@ jobs:
       MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
 
     steps:
-      - name: Clear proxy settings
-        run: |
-          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          git config --global --unset http.proxy || true
-          git config --global --unset https.proxy || true
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -258,12 +234,6 @@ jobs:
       MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
 
     steps:
-      - name: Clear proxy settings
-        run: |
-          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          git config --global --unset http.proxy || true
-          git config --global --unset https.proxy || true
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -308,12 +278,6 @@ jobs:
       MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
 
     steps:
-      - name: Clear proxy settings
-        run: |
-          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          git config --global --unset http.proxy || true
-          git config --global --unset https.proxy || true
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -358,12 +322,6 @@ jobs:
       MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
 
     steps:
-      - name: Clear proxy settings
-        run: |
-          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
-          git config --global --unset http.proxy || true
-          git config --global --unset https.proxy || true
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
