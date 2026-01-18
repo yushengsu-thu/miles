@@ -135,7 +135,7 @@ def execute_train(
             # will prevent ray from buffering stdout/stderr
             f"unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY RAY_ADDRESS && "
             f"export PYTHONBUFFERED=16 && "
-            f"ray start --head --node-ip-address {master_addr} --num-gpus {num_gpus_per_node} --disable-usage-stats"
+            f"ray start --head --num-gpus {num_gpus_per_node} --disable-usage-stats"
         )
 
     if (f := before_ray_job_submit) is not None:
