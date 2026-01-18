@@ -76,6 +76,8 @@ jobs:
 
       - name: Execute
         shell: bash
+        env:
+          RAY_ADDRESS: ""
         run: python tests/ci/gpu_lock_exec.py --count ${{ matrix.info.num_gpus }} -- python tests/${{ matrix.info.test_file }}
 
   e2e-test-fsdp:
@@ -129,6 +131,8 @@ jobs:
 
       - name: Execute
         shell: bash
+        env:
+          RAY_ADDRESS: ""
         run: python tests/ci/gpu_lock_exec.py --count ${{ matrix.info.num_gpus }} -- python tests/${{ matrix.info.test_file }}
 
   e2e-test-megatron:
@@ -182,6 +186,8 @@ jobs:
 
       - name: Execute
         shell: bash
+        env:
+          RAY_ADDRESS: ""
         run: python tests/ci/gpu_lock_exec.py --count ${{ matrix.info.num_gpus }} -- python tests/${{ matrix.info.test_file }}
 
   e2e-test-precision:
@@ -235,6 +241,8 @@ jobs:
 
       - name: Execute
         shell: bash
+        env:
+          RAY_ADDRESS: ""
         run: python tests/ci/gpu_lock_exec.py --count ${{ matrix.info.num_gpus }} -- python tests/${{ matrix.info.test_file }}
 
   e2e-test-ckpt:
@@ -288,6 +296,8 @@ jobs:
 
       - name: Execute
         shell: bash
+        env:
+          RAY_ADDRESS: ""
         run: python tests/ci/gpu_lock_exec.py --count ${{ matrix.info.num_gpus }} -- python tests/${{ matrix.info.test_file }}
 
   e2e-test-long:
@@ -341,6 +351,8 @@ jobs:
 
       - name: Execute
         shell: bash
+        env:
+          RAY_ADDRESS: ""
         run: python tests/ci/gpu_lock_exec.py --count ${{ matrix.info.num_gpus }} -- python tests/${{ matrix.info.test_file }}
 
   e2e-test-image:
@@ -394,4 +406,6 @@ jobs:
 
       - name: Execute
         shell: bash
+        env:
+          RAY_ADDRESS: ""
         run: python tests/ci/gpu_lock_exec.py --count ${{ matrix.info.num_gpus }} -- python tests/${{ matrix.info.test_file }}
