@@ -133,10 +133,14 @@ def execute_train(
     if not external_ray:
         exec_command(
             # will prevent ray from buffering stdout/stderr
+            # Force Ray to use 127.0.0.1 for all internal communication to avoid Docker network issues
             f"unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY RAY_ADDRESS && "
             f"export PYTHONBUFFERED=16 && "
-            f"ray start --head --num-gpus {num_gpus_per_node} --disable-usage-stats"
+            f"export RAY_ADDRESS=127.0.0.1:6379 && "
+            f"ray start --head --node-ip-address 127.0.0.1 --num-gpus {num_gpus_per_node} --disable-usage-stats"
         )
+        # Set RAY_ADDRESS in Python process so subsequent exec_command calls inherit it
+        os.environ["RAY_ADDRESS"] = "127.0.0.1:6379"
 
     if (f := before_ray_job_submit) is not None:
         f()
@@ -186,7 +190,9 @@ def execute_train(
             else ""
         )
         exec_command(
-            f"unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY RAY_ADDRESS && "
+            # Clear proxies but explicitly set RAY_ADDRESS to 127.0.0.1:6379
+            f"unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && "
+            f"export RAY_ADDRESS=127.0.0.1:6379 && "
             f"export no_proxy=127.0.0.1 && export PYTHONBUFFERED=16 && "
             f"{cmd_megatron_model_source}"
             f'ray job submit --address="http://127.0.0.1:8265" '
