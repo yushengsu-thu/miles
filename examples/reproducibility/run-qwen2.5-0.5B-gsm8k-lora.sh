@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Debug this:
+#   "--offload-rollout-level kv_cache weight "
+
 export FLASHINFER_DISABLE_VERSION_CHECK=1
 
 # for rerun the task
@@ -155,6 +158,7 @@ OPTIMIZER_ARGS=(
 #    --wandb-project miles-dev
 #    --wandb-group qwen2.5-0.5B-gsm8k-deterministic
 # )
+
 
 WANDB_ARGS=(
    --use-wandb

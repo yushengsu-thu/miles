@@ -279,8 +279,8 @@ def setup_model_and_optimizer(
             dropout=args.lora_dropout,
             ##Below for Lora
             # dropout_position=getattr(args, 'lora_dropout_position', 'pre'),
-            # lora_A_init_method=getattr(args, 'lora_A_init_method', 'xavier'),
-            # lora_B_init_method=getattr(args, 'lora_B_init_method', 'zero'),
+            lora_A_init_method=getattr(args, 'lora_A_init_method', 'xavier'),
+            lora_B_init_method=getattr(args, 'lora_B_init_method', 'zero'),
             # a2a_experimental=getattr(args, 'lora_a2a_experimental', False),
         )
 
