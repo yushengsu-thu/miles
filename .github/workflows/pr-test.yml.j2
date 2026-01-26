@@ -58,7 +58,7 @@
     },
     'e2e-test-image': {
       'label': 'run-ci-image',
-      'image': 'radixark/miles-test:latest',
+      'image': 'radixark/miles:latest',
       'tests': [
         {'test_file': 'test_qwen2.5_0.5B_gsm8k_async_short.py', 'num_gpus': 4},
         {'test_file': 'test_qwen2.5_0.5B_gsm8k_short.py', 'num_gpus': 4},
@@ -111,7 +111,7 @@ jobs:
       options: >
         --gpus all
         --ipc=host
-        --shm-size=32g
+        --shm-size=16g
         --ulimit memlock=-1
         --ulimit stack=67108864
         --memory=0
@@ -119,9 +119,6 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
-        --privileged
-        --ulimit nofile=65535:65535
-        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -160,4 +157,14 @@ jobs:
       - name: Execute
         shell: bash
         run: python tests/ci/gpu_lock_exec.py --count ${{ matrix.info.num_gpus }} -- << config.test_executor | default('python') >> tests/${{ matrix.info.test_file }}
+
+      - name: Post-test cleanup
+        if: always()
+        shell: bash
+        run: |
+          pkill -9 -f 'ray::' 2>/dev/null || true
+          pkill -9 -f raylet 2>/dev/null || true
+          ray stop --force 2>/dev/null || true
+          rm -rf /tmp/ray/* 2>/dev/null || true
+
 <% endfor %>
