@@ -41,6 +41,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -106,6 +109,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -171,6 +177,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -236,6 +245,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -301,6 +313,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -366,6 +381,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -431,6 +449,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -496,6 +517,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
@@ -561,6 +585,9 @@ jobs:
         -v /mnt/nvme0n1/miles_ci:/data/miles_ci
         -v /mnt/nvme0n1/miles_ci/models:/root/models
         -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
+        --privileged
+        --ulimit nofile=65535:65535
+        -v /tmp:/tmp
     strategy:
       fail-fast: false
       matrix:
