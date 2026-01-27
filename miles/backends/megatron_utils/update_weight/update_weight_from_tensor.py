@@ -337,21 +337,15 @@ def _send_lora_to_colocated_engine(
     lora_name: str,
 ) -> tuple[list[ObjectRef], Any]:
     """Send LoRA weights to colocated engine via load_lora_adapter_from_tensors.
-    
-    Uses FlattenedTensorBucket for cross-process serialization (same as base weights).
     """
     
     long_live_tensors = []
-    
-    # Use FlattenedTensorBucket (same as base weights) for proper cross-process serialization
-    flattened_tensor_bucket = FlattenedTensorBucket(named_tensors=lora_named_tensors)
-    metadata = flattened_tensor_bucket.get_metadata()
-    flattened_tensor_data = {
-        "flattened_tensor": flattened_tensor_bucket.get_flattened_tensor(),
-        "metadata": metadata,
-    }
-    long_live_tensors.append(flattened_tensor_data)
-    serialized_lora = MultiprocessingSerializer.serialize(flattened_tensor_data, output_str=True)
+
+    # Use same serialize method as fsdp
+    # FlattenedTensorBucket is not supported for sglang POST /load_lora_adapter_from_tensors 
+    lora_weights = {name: tensor.contiguous() for name, tensor in lora_named_tensors}
+    long_live_tensors.append(lora_weights)
+    serialized_lora = MultiprocessingSerializer.serialize(lora_weights, output_str=True)
     
     # Gather from all ranks in the group
     serialized_lora_gathered = (
@@ -386,8 +380,7 @@ def _send_lora_to_colocated_engine(
         refs.append(ipc_engine.load_lora_adapter_from_tensors.remote(
             lora_name=lora_name,
             serialized_tensors=serialized_lora_gathered[0],  # FlattenedTensorBucket format
-            config_dict=lora_config,
-            load_format="flattened_bucket",  # Add this to indicate the format
+            config_dict=lora_config
         ))
     
     return refs, long_live_tensors
