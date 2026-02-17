@@ -33,12 +33,12 @@ from ..training_utils.log_utils import log_perf_data, log_rollout_data
 from ..training_utils.loss import compute_advantages_and_returns, get_log_probs_and_entropy, get_values
 from .checkpoint import load_checkpoint
 from .initialize import init, is_megatron_main_rank
+from .lora_utils import is_lora_enabled
 from .model import forward_only, initialize_model_and_optimizer, save, train
 from .parallel import create_megatron_parallel_state
 from .update_weight.common import named_params_and_buffers
 from .update_weight.update_weight_from_distributed import UpdateWeightFromDistributed
 from .update_weight.update_weight_from_tensor import UpdateWeightFromTensor
-from .lora_utils import is_lora_enabled, is_lora_model, freeze_base_model
 
 logging.getLogger("megatron").setLevel(logging.WARNING)
 

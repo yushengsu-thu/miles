@@ -5,7 +5,7 @@ import os
 from argparse import Namespace
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Union, Type
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -108,7 +108,7 @@ def _is_adapter_param_name(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _get_lora_class_name(lora_type: Union[Type, object, None]) -> str:
+def _get_lora_class_name(lora_type: type | object | None) -> str:
     """Resolve LoRA type to its class name string."""
     if lora_type is None:
         return "CanonicalLoRA"
@@ -118,8 +118,8 @@ def _get_lora_class_name(lora_type: Union[Type, object, None]) -> str:
 
 
 def convert_target_modules_to_megatron(
-    hf_modules: Union[str, list[str]],
-    lora_type: Union[Type, object, None] = None,
+    hf_modules: str | list[str],
+    lora_type: type | object | None = None,
 ) -> list[str]:
     """Convert HuggingFace LoRA target module names to Megatron format.
 
@@ -203,8 +203,8 @@ def create_lora_instance(args: Namespace):
     Returns:
         A LoRA/CanonicalLoRA dataclass instance ready to be applied to a model.
     """
-    from megatron.bridge.peft.lora import LoRA
     from megatron.bridge.peft.canonical_lora import CanonicalLoRA
+    from megatron.bridge.peft.lora import LoRA
 
     lora_type_name = getattr(args, "lora_type", "lora").lower()
 
@@ -271,7 +271,9 @@ def save_lora_checkpoint(
     export performs TP all-gather internally. Only ``dp_rank == 0`` writes files.
     """
     import json
+
     from megatron.bridge import AutoBridge
+
     from miles.utils import megatron_bridge_utils
 
     save_path = Path(save_dir)

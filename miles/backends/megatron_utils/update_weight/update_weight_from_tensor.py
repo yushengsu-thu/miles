@@ -1,3 +1,4 @@
+import logging
 from argparse import Namespace
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -9,6 +10,7 @@ from megatron.core import mpu
 from ray import ObjectRef
 from ray.actor import ActorHandle
 
+from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME, build_lora_sync_config, is_lora_weight_name
 from miles.utils.distributed_utils import get_gloo_group
 
 from ..sglang import FlattenedTensorBucket, MultiprocessingSerializer
@@ -19,15 +21,6 @@ from .update_weight_from_distributed import (
     post_process_weights,
     update_weights_from_distributed,
 )
-
-from miles.backends.megatron_utils.lora_utils import (
-    LORA_ADAPTER_NAME,
-    build_lora_sync_config,
-    is_lora_enabled,
-    is_lora_weight_name,
-)
-
-import logging
 
 logger = logging.getLogger(__name__)
 

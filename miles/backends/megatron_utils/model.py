@@ -19,8 +19,7 @@ from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer
 from megatron.core.optimizer.optimizer import MegatronOptimizer
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.pipeline_parallel import get_forward_backward_func
-from megatron.core.utils import get_attr_wrapped_model
-from megatron.core.utils import get_model_config
+from megatron.core.utils import get_attr_wrapped_model, get_model_config
 from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
 
@@ -60,6 +59,7 @@ def _ensure_model_list(model):
 def _make_value_model_hook(hidden_size: int, sequence_parallel: bool):
     """Create a pre-wrap hook that replaces the output layer with a value head."""
     from megatron.core import parallel_state
+
     from .model_provider import LinearForLastLayer
 
     def hook(model):

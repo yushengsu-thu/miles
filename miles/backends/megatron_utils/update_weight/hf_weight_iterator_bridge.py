@@ -1,5 +1,4 @@
 import dataclasses
-import torch
 
 from miles.utils import megatron_bridge_utils
 from miles.utils.iter_utils import chunk_named_params_by_size

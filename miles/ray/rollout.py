@@ -183,14 +183,6 @@ class RolloutManager:
             ]
         )
 
-    def health_monitoring_pause(self):
-        if self.args.use_fault_tolerance and hasattr(self, "_health_monitor"):
-            self._health_monitor.stop()
-
-    def health_monitoring_resume(self):
-        if self.args.use_fault_tolerance and hasattr(self, "_health_monitor"):
-            self._health_monitor.start()
-
     def onload(self, tags: list[str] | None = None):
         return ray.get(
             [

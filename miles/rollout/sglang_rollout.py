@@ -13,6 +13,7 @@ import sglang_router
 from packaging.version import parse
 from tqdm import tqdm
 
+from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.rollout.base_types import RolloutFnEvalOutput, RolloutFnTrainOutput
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
 from miles.utils.async_utils import run
@@ -24,8 +25,6 @@ from miles.utils.processing_utils import encode_image_for_rollout_engine, load_p
 from miles.utils.types import Sample
 
 from .rm_hub import async_rm, batched_async_rm
-
-from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME, is_lora_enabled
 
 __all__ = ["generate_rollout"]
 
