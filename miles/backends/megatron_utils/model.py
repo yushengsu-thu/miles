@@ -43,9 +43,11 @@ logger = logging.getLogger(__name__)
 # Bridge / LoRA model setup helpers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _BridgeWrapperConfig:
     """Configuration for Megatron-Bridge module wrapping."""
+
     is_value_model: bool = False
     wrap_with_ddp: bool = True
     use_distributed_optimizer: bool = True
@@ -144,9 +146,7 @@ def _setup_lora_model_via_bridge(args: Namespace) -> list:
         or "ForSequenceClassification" in hf_config.architectures[0]
     )
     if is_value_model:
-        hidden_size = (
-            hf_config.text_config.hidden_size if hasattr(hf_config, "text_config") else hf_config.hidden_size
-        )
+        hidden_size = hf_config.text_config.hidden_size if hasattr(hf_config, "text_config") else hf_config.hidden_size
         provider.register_pre_wrap_hook(_make_value_model_hook(hidden_size, provider.sequence_parallel))
 
     # Build DDP config and create model
@@ -160,6 +160,7 @@ def _setup_lora_model_via_bridge(args: Namespace) -> list:
 # ---------------------------------------------------------------------------
 # Optimizer / Scheduler
 # ---------------------------------------------------------------------------
+
 
 def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer) -> OptimizerParamScheduler:
     """Create and configure the optimizer learning-rate/weight-decay scheduler.
@@ -213,6 +214,7 @@ def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer)
 # Model + Optimizer setup
 # ---------------------------------------------------------------------------
 
+
 def setup_model_and_optimizer(
     args: Namespace,
     role: str = "actor",
@@ -257,6 +259,7 @@ def setup_model_and_optimizer(
 # Forward pre-hook helpers
 # ---------------------------------------------------------------------------
 
+
 def enable_forward_pre_hook(model_chunks: Sequence[DDP]) -> None:
     """Enable forward pre-hooks for provided DDP-wrapped model chunks.
 
@@ -288,6 +291,7 @@ def should_disable_forward_pre_hook(args: Namespace) -> bool:
 # ---------------------------------------------------------------------------
 # Forward-only inference
 # ---------------------------------------------------------------------------
+
 
 @torch.no_grad()
 def forward_only(
@@ -423,6 +427,7 @@ def forward_only(
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
+
 
 def train_one_step(
     args: Namespace,
@@ -795,6 +800,7 @@ def train(
 # Checkpoint save
 # ---------------------------------------------------------------------------
 
+
 def save(
     iteration: int, model: Sequence[DDP], optimizer: MegatronOptimizer, opt_param_scheduler: OptimizerParamScheduler
 ) -> None:
@@ -892,6 +898,7 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
 # ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
+
 
 def initialize_model_and_optimizer(
     args: Namespace, role: str = "actor"

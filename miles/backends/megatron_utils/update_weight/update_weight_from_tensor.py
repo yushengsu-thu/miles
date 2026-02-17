@@ -300,10 +300,12 @@ def _send_lora_to_colocated_engine(
         except Exception:
             logger.debug(f"No existing LoRA adapter '{lora_name}' to unload (this is expected on first sync)")
 
-        refs.append(ipc_engine.load_lora_adapter_from_tensors.remote(
-            lora_name=lora_name,
-            serialized_tensors=serialized_lora_gathered[0],
-            config_dict=lora_config,
-        ))
+        refs.append(
+            ipc_engine.load_lora_adapter_from_tensors.remote(
+                lora_name=lora_name,
+                serialized_tensors=serialized_lora_gathered[0],
+                config_dict=lora_config,
+            )
+        )
 
     return refs, long_live_tensors

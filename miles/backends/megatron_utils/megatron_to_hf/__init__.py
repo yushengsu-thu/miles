@@ -94,6 +94,7 @@ def convert_lora_to_hf(args, model_name, name, param):
     HF PEFT format:  base_model.model.model.layers.0.self_attn.q_proj.lora_A.weight
     """
     import warnings
+
     warnings.warn(
         "convert_lora_to_hf uses incorrect hardcoded name mapping for fused layers. "
         "Use AutoBridge.export_adapter_weights instead.",

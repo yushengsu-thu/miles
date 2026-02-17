@@ -58,7 +58,6 @@ def _to_local_gpu_id(physical_gpu_id: int) -> int:
 def launch_server_process(server_args: ServerArgs) -> multiprocessing.Process:
     from sglang.srt.entrypoints.http_server import launch_server
 
-
     multiprocessing.set_start_method("spawn", force=True)
     server_args.host = server_args.host.strip("[]")
     p = multiprocessing.Process(target=launch_server, args=(server_args,))
@@ -277,7 +276,7 @@ class SGLangEngine(RayActor):
             "update_weights_from_tensor",
             payload,
         )
-    
+
     def load_lora_adapter_from_tensors(
         self,
         lora_name: str,
@@ -382,9 +381,6 @@ class SGLangEngine(RayActor):
             "release_memory_occupation",
             {"tags": tags},
         )
-
-    
-
 
     def resume_memory_occupation(self, tags: list[str] = None):
         """
@@ -592,7 +588,6 @@ def _compute_server_args(
         if hasattr(args, f"sglang_{attr.name}") and attr.name not in kwargs:
             kwargs[attr.name] = getattr(args, f"sglang_{attr.name}")
         unused_keys.discard(attr.name)
-
 
     # for compatibility with old args
     if len(unused_keys) > 0:

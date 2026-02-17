@@ -76,7 +76,6 @@ class MegatronTrainRayActor(TrainRayActor):
         }
         dist.barrier(group=get_gloo_group())
 
-
         if args.offload_train:
             if (x := args.train_memory_margin_bytes) > 0:
                 # --train-memory-margin-bytes can tune this
@@ -117,10 +116,9 @@ class MegatronTrainRayActor(TrainRayActor):
         self._active_model_tag: str | None = "actor"
         self.weights_backuper.backup("actor")
 
-
         if with_ref:
             self.load_other_checkpoint("ref", args.ref_load)
-        
+
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
             self.load_other_checkpoint("old_actor", args.load)
@@ -189,7 +187,6 @@ class MegatronTrainRayActor(TrainRayActor):
             raise ValueError(f"Cannot switch to unknown model tag: {target_tag}")
         self.weights_backuper.restore(target_tag)
         self._active_model_tag = target_tag
-
 
     def fill_routing_replay(self, data_iterator, num_microbatches, rollout_data):
         if "rollout_routed_experts" not in rollout_data:
@@ -510,7 +507,7 @@ class MegatronTrainRayActor(TrainRayActor):
             if is_lora_enabled(self.args):
                 torch_memory_saver.pause()
             destroy_process_groups()
-    
+
     def load_other_checkpoint(self, model_tag: str, path: str) -> None:
         old_args = self.args.load, self.args.no_load_optim, self.args.no_load_rng, self.args.finetune
         self.args.load = path

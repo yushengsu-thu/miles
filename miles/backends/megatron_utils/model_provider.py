@@ -19,9 +19,6 @@ from megatron.training.arguments import core_transformer_config_from_args
 from miles.utils.misc import load_function
 
 
-
-
-
 # Adapt from https://github.com/volcengine/verl/blob/c3b20575d2bc815fcccd84bddb4c0401fc4b632b/verl/models/llama/megatron/layers/parallel_linear.py#L82
 class LinearForLastLayer(torch.nn.Linear):
     def __init__(
@@ -80,7 +77,6 @@ def get_model_provider_func(
 
         return wrapped_model_provider
 
-
     if args.megatron_to_hf_mode == "bridge":
         from megatron.bridge import AutoBridge
 
@@ -96,8 +92,7 @@ def get_model_provider_func(
 
         provider.finalize()
         return provider.provide
-    
-    
+
     def model_provider(pre_process: bool = True, post_process: bool = True, vp_stage: int | None = None) -> GPTModel:
         """Builds the model.
 

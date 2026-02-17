@@ -44,8 +44,13 @@ _CANONICAL_LORA_HF_TO_MEGATRON = {
 }
 
 _CANONICAL_LORA_ALL_MODULES = [
-    "linear_q", "linear_k", "linear_v", "linear_proj",
-    "linear_fc1_up", "linear_fc1_gate", "linear_fc2",
+    "linear_q",
+    "linear_k",
+    "linear_v",
+    "linear_proj",
+    "linear_fc1_up",
+    "linear_fc1_gate",
+    "linear_fc2",
 ]
 
 # Megatron -> HF (inverse mapping, one-to-many)
@@ -71,6 +76,7 @@ _HF_MODULE_NAMES = {"q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_pro
 # Core helpers
 # ---------------------------------------------------------------------------
 
+
 def is_lora_enabled(args: Namespace) -> bool:
     """Check if LoRA is enabled based on arguments."""
     return getattr(args, "lora_rank", 0) > 0 or getattr(args, "lora_adapter_path", None) is not None
@@ -94,15 +100,13 @@ def is_lora_weight_name(name: str) -> bool:
 
 def _is_adapter_param_name(name: str) -> bool:
     """Check if a parameter name belongs to a LoRA adapter (Megatron internal naming)."""
-    return (
-        "lora_" in name
-        or (".adapter." in name and ("linear_in" in name or "linear_out" in name))
-    )
+    return "lora_" in name or (".adapter." in name and ("linear_in" in name or "linear_out" in name))
 
 
 # ---------------------------------------------------------------------------
 # Module name conversion
 # ---------------------------------------------------------------------------
+
 
 def _get_lora_class_name(lora_type: Union[Type, object, None]) -> str:
     """Resolve LoRA type to its class name string."""
@@ -179,6 +183,7 @@ def convert_target_modules_to_hf(megatron_modules: list[str]) -> list[str]:
 # Model setup helpers (used by model.py)
 # ---------------------------------------------------------------------------
 
+
 def parse_exclude_modules(args: Namespace, lora_type=None) -> list[str]:
     """Parse and convert exclude_modules argument."""
     exclude_modules: list[str] = []
@@ -233,6 +238,7 @@ def create_lora_instance(args: Namespace):
 # Parameter freezing / trainable param helpers
 # ---------------------------------------------------------------------------
 
+
 def freeze_base_model(model: Sequence[torch.nn.Module]) -> None:
     """Freeze base model parameters, only keep LoRA trainable."""
     for model_chunk in model:
@@ -244,6 +250,7 @@ def freeze_base_model(model: Sequence[torch.nn.Module]) -> None:
 # ---------------------------------------------------------------------------
 # Checkpoint save/load
 # ---------------------------------------------------------------------------
+
 
 def save_lora_checkpoint(
     model: Sequence[torch.nn.Module],
@@ -288,9 +295,7 @@ def save_lora_checkpoint(
 
         native_path = save_path / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
         torch.save(adapter_state, native_path)
-        logger.info(
-            f"Saved {len(adapter_state)} adapter tensors (native) to {native_path}"
-        )
+        logger.info(f"Saved {len(adapter_state)} adapter tensors (native) to {native_path}")
 
     # ---- HF PEFT format (uses bridge for correct name/weight conversion) ----
     # Bridge export is collective: all TP ranks participate in the all-gather,
@@ -300,7 +305,9 @@ def save_lora_checkpoint(
     lora_state_dict: dict[str, torch.Tensor] = {}
     with megatron_bridge_utils.patch_megatron_model(model):
         for hf_name, weight, _megatron_name in bridge.export_adapter_weights(
-            model, cpu=True, show_progress=False,
+            model,
+            cpu=True,
+            show_progress=False,
         ):
             lora_state_dict[hf_name] = weight
 
@@ -325,9 +332,7 @@ def save_lora_checkpoint(
             json.dump(config, f, indent=2)
 
         os.sync()
-        logger.info(
-            f"Saved HF PEFT adapter to {save_path} with {len(lora_state_dict)} tensors"
-        )
+        logger.info(f"Saved HF PEFT adapter to {save_path} with {len(lora_state_dict)} tensors")
 
     if dist.is_initialized():
         dist.barrier()
@@ -371,9 +376,7 @@ def load_lora_adapter(
                 if name in state_dict:
                     param.data.copy_(state_dict[name].to(device=param.device))
                     loaded += 1
-        logger.info(
-            f"Loaded {loaded} adapter tensors from Megatron-native checkpoint: {native_path}"
-        )
+        logger.info(f"Loaded {loaded} adapter tensors from Megatron-native checkpoint: {native_path}")
         return True
 
     # ---- HF PEFT format (future work) ----
@@ -393,6 +396,7 @@ def load_lora_adapter(
 # ---------------------------------------------------------------------------
 # LoRA config dict for weight sync to SGLang
 # ---------------------------------------------------------------------------
+
 
 def build_lora_sync_config(args: Namespace) -> dict[str, Any]:
     """Build LoRA config dict for syncing weights to SGLang engines."""
