@@ -192,6 +192,14 @@ class RolloutManager:
             ]
         )
 
+    def health_monitoring_pause(self):
+        if self.args.use_fault_tolerance and hasattr(self, "_health_monitor"):
+            self._health_monitor.stop()
+
+    def health_monitoring_resume(self):
+        if self.args.use_fault_tolerance and hasattr(self, "_health_monitor"):
+            self._health_monitor.start()
+
     def onload_weights(self):
         self.onload(tags=[GPU_MEMORY_TYPE_WEIGHTS])
 
@@ -218,14 +226,6 @@ class RolloutManager:
     def clear_num_new_engines(self):
         # when fault tolerance is not enabled, we need to manually clear num_new_engines after update_weights
         self.num_new_engines = 0
-
-    def health_monitoring_pause(self) -> None:
-        if self._health_monitor is not None:
-            self._health_monitor.pause()
-
-    def health_monitoring_resume(self) -> None:
-        if self._health_monitor is not None:
-            self._health_monitor.resume()
 
     def check_weights(self, action: str):
         return ray.get([engine.check_weights.remote(action=action) for engine in self.rollout_engines])
