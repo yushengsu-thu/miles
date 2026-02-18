@@ -40,6 +40,7 @@ EVAL_CONFIG_PATH=${SKILLS_EVAL_CONFIG_PATH:-"${REPO_ROOT}/miles/examples/eval/sc
 CKPT_ARGS=(
    # --hf-checkpoint /root/Qwen3-4B
    --hf-checkpoint /root/models/Qwen3-4B
+   --megatron-to-hf-mode bridge
 )
 
 
@@ -139,10 +140,9 @@ SGLANG_ARGS=(
    --sglang-mem-fraction-static 0.7
    # --sglang-mem-fraction-static 0.4
 
-   --sglang-enable-deterministic-inference
-   --sglang-attention-backend flashinfer
-
-   --deterministic-mode
+   # --sglang-enable-deterministic-inference
+   # --sglang-attention-backend flashinfer
+   # --deterministic-mode
 )
 
 MISC_ARGS=(
