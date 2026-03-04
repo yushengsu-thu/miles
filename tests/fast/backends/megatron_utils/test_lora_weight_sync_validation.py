@@ -70,26 +70,20 @@ class TestCheckWeightSyncResults:
     """Validate that _check_weight_sync_results raises on engine failures."""
 
     def test_success_results_pass(self):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            _check_weight_sync_results,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import _check_weight_sync_results
 
         results = [_FakeEngineResult(success=True)]
         _check_weight_sync_results(results, is_lora=True)
 
     def test_failure_result_raises_for_lora(self):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            _check_weight_sync_results,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import _check_weight_sync_results
 
         results = [_FakeEngineResult(success=False, error_message="incompatible format")]
         with pytest.raises(RuntimeError, match="LoRA weight sync failed"):
             _check_weight_sync_results(results, is_lora=True)
 
     def test_failure_result_raises_for_base(self):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            _check_weight_sync_results,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import _check_weight_sync_results
 
         results = [_FakeEngineResult(success=False, error_message="bad version")]
         with pytest.raises(RuntimeError, match="Base model weight sync failed"):
@@ -97,17 +91,13 @@ class TestCheckWeightSyncResults:
 
     def test_plain_tuple_results_pass(self):
         """Non-dataclass results (e.g. (True, 'Success') tuples) should not raise."""
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            _check_weight_sync_results,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import _check_weight_sync_results
 
         results = [(True, "Success")]
         _check_weight_sync_results(results, is_lora=False)
 
     def test_mixed_results_raises_on_first_failure(self):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            _check_weight_sync_results,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import _check_weight_sync_results
 
         results = [
             _FakeEngineResult(success=True),
@@ -128,9 +118,7 @@ class TestSendHfParamsEmptyLoraDetection:
     @patch(f"{_UW_MODULE}.dist")
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
     def test_raises_when_no_lora_weights_in_chunk(self, mock_iter_base, mock_dist):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            UpdateWeightFromTensor,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
         mock_dist.get_world_size.return_value = 1
         mock_dist.get_rank.return_value = 0
@@ -158,9 +146,7 @@ class TestSendHfParamsEmptyLoraDetection:
     @patch(f"{_UW_MODULE}.dist")
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
     def test_passes_when_lora_weights_present(self, mock_iter_base, mock_dist, mock_send):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            UpdateWeightFromTensor,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
         mock_dist.get_world_size.return_value = 1
         mock_dist.get_rank.return_value = 0
@@ -199,9 +185,7 @@ class TestUpdateWeightsZeroChunks:
     @patch(f"{_UW_MODULE}.dist")
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
     def test_raises_on_zero_lora_chunks(self, mock_iter_base, mock_dist, mock_ray, mock_gloo):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            UpdateWeightFromTensor,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
         mock_dist.get_world_size.return_value = 1
         mock_dist.get_rank.return_value = 0
@@ -232,9 +216,7 @@ class TestUpdateWeightsZeroChunks:
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
     def test_no_raise_for_base_model_zero_chunks(self, mock_iter_base, mock_dist, mock_ray, mock_gloo):
         """Base model weight sync with zero chunks is valid (e.g. empty model state)."""
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
-            UpdateWeightFromTensor,
-        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
         mock_dist.get_world_size.return_value = 1
         mock_dist.get_rank.return_value = 0
@@ -285,7 +267,7 @@ class TestFlattenedTensorBucketRoundTrip:
         reconstructed = bucket.reconstruct_tensors()
 
         assert len(reconstructed) == len(tensors)
-        for (orig_name, orig_t), (rec_name, rec_t) in zip(tensors, reconstructed):
+        for (orig_name, orig_t), (rec_name, rec_t) in zip(tensors, reconstructed, strict=True):
             assert orig_name == rec_name
             assert orig_t.shape == rec_t.shape
             assert orig_t.dtype == rec_t.dtype
@@ -314,7 +296,7 @@ class TestFlattenedTensorBucketRoundTrip:
         reconstructed = bucket.reconstruct_tensors()
 
         assert len(reconstructed) == len(tensors)
-        for (orig_name, orig_t), (rec_name, rec_t) in zip(tensors, reconstructed):
+        for (orig_name, orig_t), (rec_name, rec_t) in zip(tensors, reconstructed, strict=True):
             assert orig_name == rec_name
             assert orig_t.dtype == rec_t.dtype
             assert torch.equal(orig_t, rec_t), f"Tensor {orig_name} values differ after round-trip"
@@ -335,7 +317,7 @@ class TestFlattenedTensorBucketRoundTrip:
         receiver_bucket = FlattenedTensorBucket(flattened_tensor=flat_tensor, metadata=metadata)
         reconstructed = receiver_bucket.reconstruct_tensors()
 
-        for (orig_name, orig_t), (rec_name, rec_t) in zip(original, reconstructed):
+        for (orig_name, orig_t), (rec_name, rec_t) in zip(original, reconstructed, strict=True):
             assert orig_name == rec_name
             assert torch.equal(orig_t, rec_t)
 
@@ -355,6 +337,6 @@ class TestFlattenedTensorBucketRoundTrip:
         bucket = FlattenedTensorBucket(named_tensors=lora_only)
         reconstructed = bucket.reconstruct_tensors()
 
-        for (orig_name, orig_t), (rec_name, rec_t) in zip(lora_only, reconstructed):
+        for (orig_name, orig_t), (rec_name, rec_t) in zip(lora_only, reconstructed, strict=True):
             assert orig_name == rec_name
             assert torch.equal(orig_t, rec_t)

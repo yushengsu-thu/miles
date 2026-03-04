@@ -171,8 +171,7 @@ class UpdateWeightFromTensor(UpdateWeight):
                 if hasattr(result, "success") and not result.success:
                     error_msg = getattr(result, "error_message", "unknown error")
                     raise RuntimeError(
-                        f"Weight sync failed on rollout engine: {error_msg}. "
-                        f"Check SGLang version compatibility."
+                        f"Weight sync failed on rollout engine: {error_msg}. " f"Check SGLang version compatibility."
                     )
 
         if dist.get_rank() == self._ipc_gather_src:
