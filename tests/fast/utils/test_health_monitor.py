@@ -1,5 +1,3 @@
-import pytest
-
 from miles.utils.health_monitor import compute_kill_list
 
 

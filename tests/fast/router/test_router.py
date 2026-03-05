@@ -167,9 +167,7 @@ class TestWorkerManagement:
         assert r.status_code == 400
 
     def test_remove_worker_nonexistent(self, router_env: RouterEnv):
-        r = requests.post(
-            f"{router_env.url}/remove_worker", params={"url": "http://127.0.0.1:99999"}, timeout=5.0
-        )
+        r = requests.post(f"{router_env.url}/remove_worker", params={"url": "http://127.0.0.1:99999"}, timeout=5.0)
         r.raise_for_status()
         assert r.json()["status"] == "success"
 
