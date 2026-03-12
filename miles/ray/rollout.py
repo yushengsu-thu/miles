@@ -247,7 +247,7 @@ class ServerCell:
         self._status: JobStatus = JobStatus.RUNNING
 
     @property
-    def status(self) -> "JobStatus":
+    def status(self) -> str:
         return self._status
 
     @property
@@ -296,16 +296,9 @@ class ServerCell:
         num_started = len(handles)
 
         if group.needs_offload and num_started > 0:
-            new_engines = [
-                group.all_engines[i]
-                for i in self.engine_indices
-                if group.all_engines[i] is not None
-            ]
+            new_engines = [group.all_engines[i] for i in self.engine_indices if group.all_engines[i] is not None]
             ray.get([e.release_memory_occupation.remote() for e in new_engines])
-            ray.get([
-                e.resume_memory_occupation.remote(tags=[GPU_MEMORY_TYPE_WEIGHTS])
-                for e in new_engines
-            ])
+            ray.get([e.resume_memory_occupation.remote(tags=[GPU_MEMORY_TYPE_WEIGHTS]) for e in new_engines])
 
         return num_started
 
