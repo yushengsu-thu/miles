@@ -8,7 +8,6 @@ import multiprocessing
 import os
 import random
 import time
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
