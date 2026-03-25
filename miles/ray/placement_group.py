@@ -172,7 +172,7 @@ def create_rollout_manager(args, pg):
         num_gpus=0,
     ).remote(args, pg)
 
-    ray.get(rollout_manager.ready.remote())
+    ray.get(rollout_manager.init.remote())
 
     # calculate num_rollout from num_epoch
     num_rollout_per_epoch = None
