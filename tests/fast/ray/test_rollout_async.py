@@ -1,73 +1,43 @@
-"""Tests for async behavior of ServerCell, RolloutServer, and RolloutManager recovery.
+"""Tests for cell-based FT APIs on RolloutManager.
 
 Verifies that:
-- ServerCell.start()/stop() use native ``await`` (not ``ray.get``)
-- Per-cell parallel recovery: multiple dead cells recover concurrently
-- generate (to_thread) and start_cell (async) can overlap on the event loop
-- Edge cases: no-op on healthy cells, FAILED status on exception
+- list_cells() enumerates all non-placeholder server groups
+- start_cell() restarts dead engines via ServerGroup.start_engines
+- stop_cell(cell_id, timeout_seconds) kills engines and sets slots to None
+- get_cell_status() returns "running" / "stopped" / "failed"
+- get_cell_node_ids() returns deduplicated sorted IPs
+- _find_group_by_cell_id() raises ValueError for unknown cell
 
-No GPU, no Ray cluster, no pytest-asyncio required — pure asyncio + mock.
+No GPU, no Ray cluster required — pure mock.
 """
 
-import asyncio
-import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from miles.ray.rollout import JobStatus, ServerCell
+from miles.ray.rollout import RolloutManager, RolloutServer, ServerGroup
+
+_RawRolloutManager = RolloutManager.__ray_actor_class__
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _resolved_future(value=None):
-    loop = asyncio.get_event_loop()
-    fut = loop.create_future()
-    fut.set_result(value)
-    return fut
-
-
-def _delayed_future(delay: float, value=None):
-    loop = asyncio.get_event_loop()
-    fut = loop.create_future()
-
-    async def _resolve():
-        await asyncio.sleep(delay)
-        if not fut.done():
-            fut.set_result(value)
-
-    asyncio.ensure_future(_resolve())
-    return fut
-
-
-def _mock_engine():
-    engine = MagicMock()
-    engine.shutdown.remote.return_value = _resolved_future()
-    engine.release_memory_occupation.remote.return_value = _resolved_future()
-    engine.resume_memory_occupation.remote.return_value = _resolved_future()
-    return engine
-
-
-def _mock_server_group(num_engines, dead_indices=None, needs_offload=False, start_delay=0.0):
+def _mock_group(cell_id: str, worker_type: str = "regular", num_engines: int = 2, dead_indices=None):
     dead_indices = set(dead_indices or [])
-    engines = [_mock_engine() if i not in dead_indices else None for i in range(num_engines)]
+    engines = [MagicMock() if i not in dead_indices else None for i in range(num_engines)]
 
-    group = MagicMock()
+    group = MagicMock(spec=ServerGroup)
+    group.cell_id = cell_id
+    group.worker_type = worker_type
     group.all_engines = engines
-    group.needs_offload = needs_offload
+    group.engines = [e for e in engines if e is not None]
+    group.num_gpus_per_engine = 1
+    group.needs_offload = False
 
-    def fake_start_engines(port_cursors=None, target_indices=None):
-        target = set(target_indices) if target_indices is not None else {
-            i for i, e in enumerate(engines) if e is None
-        }
+    def fake_start_engines(port_cursors=None):
         handles = []
-        for i in target:
+        for i in range(len(group.all_engines)):
             if group.all_engines[i] is None:
-                group.all_engines[i] = _mock_engine()
-                handles.append(_delayed_future(start_delay) if start_delay else _resolved_future())
+                group.all_engines[i] = MagicMock()
+                handles.append(MagicMock())
         group.num_new_engines = len(handles)
         return handles, port_cursors or {}
 
@@ -75,143 +45,314 @@ def _mock_server_group(num_engines, dead_indices=None, needs_offload=False, star
     return group
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+def _mock_server(groups):
+    srv = MagicMock(spec=RolloutServer)
+    srv.server_groups = groups
+    srv.engines = [e for g in groups for e in g.engines]
+    srv.all_engines = [e for g in groups for e in g.all_engines]
+    return srv
 
 
-class TestServerCellStart:
-    def test_start_recovers_dead_engines(self):
-        async def _run():
-            group = _mock_server_group(2, dead_indices=[0, 1])
-            cell = ServerCell("c0", group, [0, 1])
-            cell._status = JobStatus.FAILED
-
-            num = await cell.start()
-            assert num == 2
-            assert cell.status == JobStatus.RUNNING
-            assert all(group.all_engines[i] is not None for i in [0, 1])
-
-        asyncio.run(_run())
-
-    def test_start_is_noop_when_healthy(self):
-        async def _run():
-            group = _mock_server_group(2, dead_indices=[])
-            cell = ServerCell("c0", group, [0, 1])
-            cell._status = JobStatus.RUNNING
-
-            num = await cell.start()
-            assert num == 0
-
-        asyncio.run(_run())
-
-    def test_start_handles_offload(self):
-        async def _run():
-            group = _mock_server_group(2, dead_indices=[0], needs_offload=True)
-            cell = ServerCell("c0", group, [0])
-            cell._status = JobStatus.FAILED
-
-            num = await cell.start()
-            assert num == 1
-            new_engine = group.all_engines[0]
-            new_engine.release_memory_occupation.remote.assert_called_once()
-            new_engine.resume_memory_occupation.remote.assert_called_once()
-
-        asyncio.run(_run())
-
-    def test_start_sets_failed_on_exception(self):
-        async def _run():
-            group = MagicMock()
-            group.all_engines = [None]
-            group.needs_offload = False
-            group.start_engines = MagicMock(side_effect=RuntimeError("boom"))
-
-            cell = ServerCell("bad", group, [0])
-            cell._status = JobStatus.FAILED
-
-            with pytest.raises(RuntimeError, match="boom"):
-                await cell.start()
-            assert cell.status == JobStatus.FAILED
-
-        asyncio.run(_run())
+def _make_manager_with_servers(servers_dict):
+    """Create a minimal RolloutManager-like object with .servers set, bypassing __init__."""
+    mgr = object.__new__(_RawRolloutManager)
+    mgr.servers = servers_dict
+    return mgr
 
 
-class TestServerCellStop:
-    def test_stop_kills_engines(self):
-        async def _run():
-            group = _mock_server_group(2, dead_indices=[])
-            cell = ServerCell("c0", group, [0, 1])
-            cell._status = JobStatus.RUNNING
+class TestListCells:
+    def test_enumerates_all_groups(self):
+        g1 = _mock_group("default-regular")
+        g2 = _mock_group("default-prefill", worker_type="prefill")
+        srv = _mock_server([g1, g2])
+        mgr = _make_manager_with_servers({"default": srv})
 
-            await cell.stop()
-            assert cell.status == JobStatus.STOPPED
-            assert all(e is None for e in group.all_engines)
+        cells = mgr.list_cells()
+        assert cells == [{"cell_id": "default-regular"}, {"cell_id": "default-prefill"}]
 
-        asyncio.run(_run())
+    def test_skips_placeholder_groups(self):
+        g1 = _mock_group("default-regular")
+        g2 = _mock_group("", worker_type="placeholder")
+        srv = _mock_server([g1, g2])
+        mgr = _make_manager_with_servers({"default": srv})
 
-    def test_stop_is_noop_when_already_stopped(self):
-        async def _run():
-            group = _mock_server_group(1, dead_indices=[])
-            cell = ServerCell("c0", group, [0])
-            cell._status = JobStatus.STOPPED
+        cells = mgr.list_cells()
+        assert cells == [{"cell_id": "default-regular"}]
 
-            await cell.stop()
-            assert cell.status == JobStatus.STOPPED
-            group.all_engines[0].shutdown.remote.assert_not_called()
+    def test_multi_model(self):
+        g1 = _mock_group("actor-regular")
+        g2 = _mock_group("ref-regular")
+        srv1 = _mock_server([g1])
+        srv2 = _mock_server([g2])
+        mgr = _make_manager_with_servers({"actor": srv1, "ref": srv2})
 
-        asyncio.run(_run())
+        cells = mgr.list_cells()
+        ids = [c["cell_id"] for c in cells]
+        assert "actor-regular" in ids
+        assert "ref-regular" in ids
 
-
-class TestPerCellParallelRecovery:
-    def test_multiple_cells_recover_in_parallel(self):
-        """If 3 cells each take ~0.1s, parallel recovery should take ~0.1s total."""
-
-        async def _run():
-            DELAY = 0.1
-            N = 3
-            group = _mock_server_group(N, dead_indices=list(range(N)), start_delay=DELAY)
-
-            cells = []
-            for i in range(N):
-                c = ServerCell(f"c{i}", group, [i])
-                c._status = JobStatus.FAILED
-                cells.append(c)
-
-            start = time.monotonic()
-            results = await asyncio.gather(*[c.start() for c in cells])
-            elapsed = time.monotonic() - start
-
-            assert sum(results) == N
-            assert all(c.status == JobStatus.RUNNING for c in cells)
-            assert elapsed < DELAY * 2, (
-                f"Cells recovered sequentially ({elapsed:.2f}s), expected parallel (~{DELAY}s)"
-            )
-
-        asyncio.run(_run())
+    def test_empty_servers(self):
+        mgr = _make_manager_with_servers({})
+        assert mgr.list_cells() == []
 
 
-class TestConcurrentGenerateAndStartCell:
-    def test_generate_and_start_cell_overlap(self):
-        """generate (to_thread) and start_cell (async) should run concurrently."""
+class TestFindGroupByCellId:
+    def test_finds_existing_cell(self):
+        g = _mock_group("default-regular")
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
 
-        async def _run():
-            DELAY = 0.1
-            group = _mock_server_group(2, dead_indices=[1], start_delay=DELAY)
-            cell = ServerCell("c1", group, [1])
-            cell._status = JobStatus.FAILED
+        assert mgr._find_group_by_cell_id("default-regular") is g
 
-            async def fake_generate():
-                await asyncio.to_thread(time.sleep, DELAY)
-                return "gen_done"
+    def test_raises_on_unknown_cell(self):
+        g = _mock_group("default-regular")
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
 
-            start = time.monotonic()
-            gen_result, start_result = await asyncio.gather(fake_generate(), cell.start())
-            elapsed = time.monotonic() - start
+        with pytest.raises(ValueError, match="not found"):
+            mgr._find_group_by_cell_id("nonexistent-cell")
 
-            assert gen_result == "gen_done"
-            assert start_result == 1
-            assert elapsed < DELAY * 1.8, (
-                f"Not concurrent ({elapsed:.2f}s), expected overlap (~{DELAY}s)"
-            )
 
-        asyncio.run(_run())
+class TestStartCell:
+    @patch("miles.ray.rollout.ray")
+    def test_restarts_dead_engines(self, mock_ray):
+        mock_ray.get = MagicMock(return_value=None)
+        g = _mock_group("default-regular", num_engines=2, dead_indices=[0, 1])
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        num = mgr.start_cell("default-regular")
+        assert num == 2
+        assert all(e is not None for e in g.all_engines)
+        mock_ray.get.assert_called_once()
+
+    @patch("miles.ray.rollout.ray")
+    def test_noop_when_all_healthy(self, mock_ray):
+        g = _mock_group("default-regular", num_engines=2, dead_indices=[])
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        num = mgr.start_cell("default-regular")
+        assert num == 0
+        mock_ray.get.assert_not_called()
+
+
+class TestStopCell:
+    @patch("miles.ray.rollout.ray")
+    def test_kills_all_engines(self, mock_ray):
+        g = _mock_group("default-regular", num_engines=2)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        mgr.stop_cell("default-regular")
+        assert all(e is None for e in g.all_engines)
+        assert mock_ray.kill.call_count == 2
+
+    @patch("miles.ray.rollout.ray")
+    def test_with_timeout(self, mock_ray):
+        g = _mock_group("default-regular", num_engines=1)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        mgr.stop_cell("default-regular", timeout_seconds=60)
+        assert g.all_engines[0] is None
+
+    @patch("miles.ray.rollout.ray")
+    def test_kill_exception_still_sets_none(self, mock_ray):
+        mock_ray.kill.side_effect = RuntimeError("actor already dead")
+        g = _mock_group("default-regular", num_engines=1)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        mgr.stop_cell("default-regular")
+        assert g.all_engines[0] is None
+
+
+class TestGetCellStatus:
+    def test_running(self):
+        g = _mock_group("default-regular", num_engines=2)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        assert mgr.get_cell_status("default-regular") == "running"
+
+    def test_stopped(self):
+        g = _mock_group("default-regular", num_engines=2, dead_indices=[0, 1])
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        assert mgr.get_cell_status("default-regular") == "stopped"
+
+    def test_failed_partial(self):
+        g = _mock_group("default-regular", num_engines=2, dead_indices=[1])
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        assert mgr.get_cell_status("default-regular") == "failed"
+
+    def test_empty_engines(self):
+        g = _mock_group("default-regular", num_engines=0)
+        g.all_engines = []
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        assert mgr.get_cell_status("default-regular") == "stopped"
+
+
+class TestGetCellNodeIds:
+    @patch("miles.ray.rollout.ray")
+    def test_returns_sorted_unique_ips(self, mock_ray):
+        g = _mock_group("default-regular", num_engines=3)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        mock_ray.get.return_value = [
+            ("10.0.0.2", 15000),
+            ("10.0.0.1", 15001),
+            ("10.0.0.2", 15002),
+        ]
+
+        ids = mgr.get_cell_node_ids("default-regular")
+        assert ids == ["10.0.0.1", "10.0.0.2"]
+
+    @patch("miles.ray.rollout.ray")
+    def test_skips_dead_engines(self, mock_ray):
+        g = _mock_group("default-regular", num_engines=2, dead_indices=[1])
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        mock_ray.get.return_value = [("10.0.0.1", 15000)]
+
+        ids = mgr.get_cell_node_ids("default-regular")
+        assert ids == ["10.0.0.1"]
+
+    def test_all_dead_returns_empty(self):
+        g = _mock_group("default-regular", num_engines=2, dead_indices=[0, 1])
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        ids = mgr.get_cell_node_ids("default-regular")
+        assert ids == []
+
+    @patch("miles.ray.rollout.ray")
+    def test_exception_returns_empty(self, mock_ray):
+        mock_ray.get.side_effect = RuntimeError("network error")
+        g = _mock_group("default-regular", num_engines=1)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        ids = mgr.get_cell_node_ids("default-regular")
+        assert ids == []
+
+
+class TestGpuFailureRecoveryFlow:
+    """End-to-end flow tests simulating GPU failure → detection → recovery."""
+
+    @patch("miles.ray.rollout.ray")
+    def test_single_engine_dies_and_recovers(self, mock_ray):
+        """One of four engines dies → status becomes 'failed' → stop → start → back to 'running'."""
+        mock_ray.get = MagicMock(return_value=None)
+        mock_ray.kill = MagicMock()
+        g = _mock_group("default-regular", num_engines=4)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        assert mgr.get_cell_status("default-regular") == "running"
+
+        # Simulate engine 2 crash (health monitor would set this to None)
+        g.all_engines[2] = None
+        assert mgr.get_cell_status("default-regular") == "failed"
+
+        # FT controller calls stop_cell to clean up remaining engines
+        mgr.stop_cell("default-regular")
+        assert mgr.get_cell_status("default-regular") == "stopped"
+        assert all(e is None for e in g.all_engines)
+
+        # FT controller calls start_cell to restart all engines
+        num_restarted = mgr.start_cell("default-regular")
+        assert num_restarted == 4
+        assert mgr.get_cell_status("default-regular") == "running"
+        assert all(e is not None for e in g.all_engines)
+
+    @patch("miles.ray.rollout.ray")
+    def test_all_engines_die_and_recover(self, mock_ray):
+        """All engines crash → status 'stopped' → start brings them back."""
+        mock_ray.get = MagicMock(return_value=None)
+        g = _mock_group("default-regular", num_engines=3, dead_indices=[0, 1, 2])
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        assert mgr.get_cell_status("default-regular") == "stopped"
+
+        num_restarted = mgr.start_cell("default-regular")
+        assert num_restarted == 3
+        assert mgr.get_cell_status("default-regular") == "running"
+
+    @patch("miles.ray.rollout.ray")
+    def test_partial_failure_direct_restart(self, mock_ray):
+        """One engine dies → start_cell only restarts the dead one (without stop first)."""
+        mock_ray.get = MagicMock(return_value=None)
+        g = _mock_group("default-regular", num_engines=4)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        original_engine_0 = g.all_engines[0]
+        original_engine_1 = g.all_engines[1]
+
+        # Simulate engine 3 crash
+        g.all_engines[3] = None
+        assert mgr.get_cell_status("default-regular") == "failed"
+
+        # start_cell only restarts the dead slot, healthy engines stay
+        num_restarted = mgr.start_cell("default-regular")
+        assert num_restarted == 1
+        assert g.all_engines[0] is original_engine_0
+        assert g.all_engines[1] is original_engine_1
+        assert g.all_engines[3] is not None
+        assert mgr.get_cell_status("default-regular") == "running"
+
+    @patch("miles.ray.rollout.ray")
+    def test_multi_model_independent_failure(self, mock_ray):
+        """GPU failure on one model doesn't affect the other model's cell status."""
+        mock_ray.get = MagicMock(return_value=None)
+        mock_ray.kill = MagicMock()
+        g_actor = _mock_group("actor-regular", num_engines=2)
+        g_ref = _mock_group("ref-regular", num_engines=2)
+        srv_actor = _mock_server([g_actor])
+        srv_ref = _mock_server([g_ref])
+        mgr = _make_manager_with_servers({"actor": srv_actor, "ref": srv_ref})
+
+        assert mgr.get_cell_status("actor-regular") == "running"
+        assert mgr.get_cell_status("ref-regular") == "running"
+
+        # Actor model engine 0 crashes
+        g_actor.all_engines[0] = None
+        assert mgr.get_cell_status("actor-regular") == "failed"
+        assert mgr.get_cell_status("ref-regular") == "running"
+
+        # Recover actor model only
+        mgr.stop_cell("actor-regular")
+        mgr.start_cell("actor-regular")
+        assert mgr.get_cell_status("actor-regular") == "running"
+        assert mgr.get_cell_status("ref-regular") == "running"
+
+    @patch("miles.ray.rollout.ray")
+    def test_repeated_failure_and_recovery(self, mock_ray):
+        """Engine fails twice in a row — system recovers each time."""
+        mock_ray.get = MagicMock(return_value=None)
+        mock_ray.kill = MagicMock()
+        g = _mock_group("default-regular", num_engines=2)
+        srv = _mock_server([g])
+        mgr = _make_manager_with_servers({"default": srv})
+
+        for _ in range(2):
+            assert mgr.get_cell_status("default-regular") == "running"
+
+            g.all_engines[0] = None
+            assert mgr.get_cell_status("default-regular") == "failed"
+
+            mgr.stop_cell("default-regular")
+            assert mgr.get_cell_status("default-regular") == "stopped"
+
+            mgr.start_cell("default-regular")
+            assert mgr.get_cell_status("default-regular") == "running"
