@@ -442,8 +442,9 @@ class RolloutManager:
         assert self.args.rollout_global_dataset
         return len(self.data_source.dataset) // self.args.rollout_batch_size
 
-    async def generate(self, rollout_id):
-        return await asyncio.to_thread(self._do_generate, rollout_id)
+    def generate(self, rollout_id):
+        # return await asyncio.to_thread(self._do_generate, rollout_id)
+        return self._do_generate(rollout_id)
 
     def _do_generate(self, rollout_id):
         start_time = time.time()
@@ -457,8 +458,9 @@ class RolloutManager:
         data = self._convert_samples_to_train_data(data)
         return self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
 
-    async def eval(self, rollout_id):
-        await asyncio.to_thread(self._do_eval, rollout_id)
+    def eval(self, rollout_id):
+        # await asyncio.to_thread(self._do_eval, rollout_id)
+        self._do_eval(rollout_id)
 
     def _do_eval(self, rollout_id):
         if self.args.debug_train_only:
@@ -477,11 +479,13 @@ class RolloutManager:
         if self._metric_checker is not None:
             self._metric_checker.on_eval(metrics)
 
-    async def save(self, rollout_id):
-        await asyncio.to_thread(self.data_source.save, rollout_id)
+    def save(self, rollout_id):
+        # await asyncio.to_thread(self.data_source.save, rollout_id)
+        self.data_source.save(rollout_id)
 
-    async def load(self, rollout_id=None):
-        await asyncio.to_thread(self.data_source.load, rollout_id)
+    def load(self, rollout_id=None):
+        # await asyncio.to_thread(self.data_source.load, rollout_id)
+        self.data_source.load(rollout_id)
 
     async def offload(self, tags: list[str] | None = None):
         self.health_monitoring_pause()
