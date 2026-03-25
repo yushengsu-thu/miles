@@ -77,6 +77,7 @@ class ServerGroup:
     model_path: str | None = None
     router_ip: str | None = None
     router_port: int | None = None
+    cell_id: str = ""
 
     @property
     def nodes_per_engine(self):
@@ -574,39 +575,74 @@ class RolloutManager:
     # directly.
     # ------------------------------------------------------------------
 
-    def _find_cell(self, cell_id: str) -> ServerCell:
+    def _find_group_by_cell_id(self, cell_id: str) -> ServerGroup:
         for srv in self.servers.values():
             for group in srv.server_groups:
-                for cell in group.cells:
-                    if cell.cell_id == cell_id:
-                        return cell
+                if group.cell_id == cell_id:
+                    return group
         raise ValueError(f"Cell {cell_id!r} not found")
 
-    async def start_cell(self, cell_id: str) -> int:
-        """Start (or restart) all engines in a cell.
+    def list_cells(self) -> list[dict]:
+        """Return a list of cell info dicts for all active server groups."""
+        cells = []
+        for srv in self.servers.values():
+            for group in srv.server_groups:
+                if group.worker_type == "placeholder" or not group.cell_id:
+                    continue
+                cells.append({"cell_id": group.cell_id})
+        return cells
 
-        A "cell" is the atomic fault-tolerance unit.  For example, in PD
-        with EP72 on 8-GPU nodes, one decode instance spans 9 nodes — those
-        9 nodes form a single cell.  If any node fails, the entire cell
-        (all 9 nodes) must be restarted as a whole.
+    def start_cell(self, cell_id: str) -> int:
+        """Start (or restart) all dead engines in a cell.
+
+        A "cell" is the atomic fault-tolerance unit mapped to one
+        ServerGroup.  Only engines whose slot is ``None`` (dead) are
+        restarted.
 
         Returns the number of engines that were newly created.
         """
-        cell = self._find_cell(cell_id)
-        return await cell.start()
+        group = self._find_group_by_cell_id(cell_id)
+        handles, _ = group.start_engines()
+        if handles:
+            ray.get(handles)
+        return group.num_new_engines
 
-    async def stop_cell(self, cell_id: str) -> None:
-        """Gracefully stop and kill all engines in a cell.
+    def stop_cell(self, cell_id: str, timeout_seconds: int = 30) -> None:
+        """Stop all engines in a cell by killing the Ray actors."""
+        group = self._find_group_by_cell_id(cell_id)
+        for i, engine in enumerate(group.all_engines):
+            if engine is not None:
+                try:
+                    ray.kill(engine)
+                except Exception:
+                    logger.warning(f"Failed to kill engine {i} in cell {cell_id}", exc_info=True)
+                group.all_engines[i] = None
 
-        See ``start_cell`` for the definition of "cell".
-        """
-        cell = self._find_cell(cell_id)
-        await cell.stop()
+    def get_cell_status(self, cell_id: str) -> str:
+        """Return the status of a cell: ``running``, ``stopped``, or ``failed``."""
+        group = self._find_group_by_cell_id(cell_id)
+        engines = group.all_engines
+        if not engines:
+            return "stopped"
+        alive = sum(1 for e in engines if e is not None)
+        if alive == len(engines):
+            return "running"
+        if alive == 0:
+            return "stopped"
+        return "failed"
 
-    async def get_cell_status(self, cell_id: str):
-        """Return the ``JobStatus`` of a cell."""
-        cell = self._find_cell(cell_id)
-        return cell.status
+    def get_cell_node_ids(self, cell_id: str) -> list[str]:
+        """Return deduplicated, sorted node IPs for all live engines in a cell."""
+        group = self._find_group_by_cell_id(cell_id)
+        live_engines = [e for e in group.all_engines if e is not None]
+        if not live_engines:
+            return []
+        try:
+            results = ray.get([e._get_current_node_ip_and_free_port.remote() for e in live_engines])
+            return sorted(set(ip for ip, _ in results))
+        except Exception:
+            logger.warning(f"Failed to get node IPs for cell {cell_id}", exc_info=True)
+            return []
 
     def _get_rollout_data(self, rollout_id):
         if self.args.load_debug_rollout_data:
@@ -1101,6 +1137,7 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
                 model_path=overrides.get("model_path", args.hf_checkpoint),
                 router_ip=router_ip,
                 router_port=router_port,
+                cell_id=f"{model_cfg.name}-{group_cfg.worker_type}",
             )
             handles, port_cursors = group.start_engines(port_cursors)
             all_init_handles.extend(handles)
