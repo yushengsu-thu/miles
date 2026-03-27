@@ -92,6 +92,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -202,6 +203,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -312,6 +314,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -422,6 +425,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -532,6 +536,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -642,6 +647,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -752,6 +758,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -862,6 +869,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -972,6 +980,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -1082,6 +1091,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -1192,6 +1202,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -1302,6 +1313,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
@@ -1367,6 +1379,7 @@ jobs:
       MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
       MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
       MILES_TEST_FEW_GPU: '0'
+      SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
       - name: Checkout repository
