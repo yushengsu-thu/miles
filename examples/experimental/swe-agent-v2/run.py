@@ -23,7 +23,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 @dataclass
 class ScriptArgs(U.ExecuteTrainConfig):
-    mode: Literal["normal", "debug_rollout_only"] = "debug_rollout_only"
+    mode: Literal["normal", "debug_rollout_only"] = "normal"
     run_id: str = U.create_run_id()
     megatron_model_type: str = "glm4.7-flash"
     num_gpus_per_node: int = 8
@@ -84,6 +84,7 @@ def execute(args: ScriptArgs):
 
     perf_args = (
         "--tensor-model-parallel-size 4 "
+        "--sequence-parallel "
         "--pipeline-model-parallel-size 1 "
         "--context-parallel-size 1 "
         "--expert-model-parallel-size 8 "
@@ -93,6 +94,9 @@ def execute(args: ScriptArgs):
         "--recompute-num-layers 1 "
         "--use-dynamic-batch-size "
         "--max-tokens-per-gpu 16384 "
+        "--optimizer-cpu-offload "
+        "--overlap-cpu-optimizer-d2h-h2d "
+        "--use-precision-aware-optimizer "
     )
 
     grpo_args = (
@@ -121,6 +125,7 @@ def execute(args: ScriptArgs):
         "--sglang-reasoning-parser glm45 "
         "--use-miles-router "
         "--sglang-router-port 30000 "
+        # TODO: speculative decoding has issue, need to fix later
     )
 
     agent_args = (
