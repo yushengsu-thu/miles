@@ -1,5 +1,3 @@
-from dataclasses import replace
-
 import pytest
 from tests.fast.fixtures.generation_fixtures import extra_argv_for_variant
 from tests.fast.fixtures.rollout_fixtures import RolloutEnvConfig
@@ -52,8 +50,7 @@ def test_train(rollout_env):
     assert len(out.samples) == env.args.rollout_batch_size
     group = out.samples[0]
     assert len(group) == env.args.n_samples_per_prompt
-    actual = replace(group[0], session_id=None)
-    assert actual == expected_sample(group_index=0)
+    assert group[0] == expected_sample(group_index=0)
 
 
 @pytest.mark.parametrize("rollout_env", _VARIANTS, indirect=True)
