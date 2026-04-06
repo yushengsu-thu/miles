@@ -416,6 +416,9 @@ class RolloutManager:
                 logger.warning(f"CI Fault Injection failed: {e}")
 
     async def dispose(self):
+        self._do_dispose()
+
+    def _do_dispose(self):
         if self._metric_checker is not None:
             self._metric_checker.dispose()
         for monitor in self._health_monitors:
