@@ -124,3 +124,34 @@ RUN git clone https://github.com/radixark/miles.git /root/miles && \
     cd /root/miles && \
     git checkout ${MILES_COMMIT} && \
     pip install -e . --no-deps
+
+# ====================================== Editable-install hygiene check ========================================
+# Fail the build if any package is installed editable from /tmp.
+#
+# Background: a /tmp-rooted editable (`pip install -e /tmp/<pkg>`) keeps the
+# egg-link / PEP 660 .pth pointed at /tmp source. Any pod that mounts /tmp
+# (emptyDir, tmpfs, ephemeral-storage volume) shadows the source dir at
+# runtime and breaks the import — `ModuleNotFoundError` at first use, far
+# from the actual cause. This step turns that runtime trap into a build
+# failure: when someone later adds `pip install -e /tmp/...` (or pulls a base
+# image where one slipped in), the build stops here instead of shipping the
+# regression to users.
+#
+# Covers both detection paths:
+#   - PEP 660 (modern pip, .pth-based): `pip show` "Editable project location:"
+#   - Legacy egg-link: `pip freeze` "-e <path>" lines
+RUN set -eu; \
+    leftover=""; \
+    for pkg in $(pip list --format=freeze | grep -v '^-e ' | sed 's/[ =@].*//'); do \
+      [ -z "$pkg" ] && continue; \
+      loc=$(pip show "$pkg" 2>/dev/null | awk -F': ' '/^Editable project location:/{print $2; exit}'); \
+      case "$loc" in /tmp/*) leftover="${leftover}${leftover:+ }${pkg}@${loc}";; esac; \
+    done; \
+    legacy=$(pip freeze 2>/dev/null | awk '/^-e \/tmp\// {print $2}'); \
+    if [ -n "$leftover" ] || [ -n "$legacy" ]; then \
+      echo "FAIL: editable install rooted at /tmp detected — install to a stable path or use a regular (non-editable) install."; \
+      [ -n "$leftover" ] && echo "  PEP 660:  $leftover"; \
+      [ -n "$legacy" ]   && echo "  legacy:   $legacy"; \
+      exit 1; \
+    fi; \
+    echo "OK: no /tmp-rooted editable installs."
