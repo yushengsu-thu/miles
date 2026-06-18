@@ -78,6 +78,13 @@ _MLA_HF_TO_MEGATRON = {
     "kv_a_proj_with_mqa": "linear_kv_down_proj",
     "q_b_proj": "linear_q_up_proj",
     "kv_b_proj": "linear_kv_up_proj",
+    # DSA indexer (GLM-5.1 / DeepSeek-V3.2): HF/SGLang leaf names wq_b/wk/weights_proj
+    # vs Megatron-Bridge names linear_wq_b/linear_wk/linear_weights_proj. Same HF<->Megatron
+    # mismatch handling as MLA above, so one --target-modules name resolves to the Megatron
+    # name for training and back to the HF name for SGLang rollout.
+    "wq_b": "linear_wq_b",
+    "wk": "linear_wk",
+    "weights_proj": "linear_weights_proj",
 }
 _MEGATRON_MLA_TO_HF = {v: k for k, v in _MLA_HF_TO_MEGATRON.items()}
 
