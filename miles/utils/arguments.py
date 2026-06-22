@@ -214,6 +214,17 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 help="The method to convert megatron weights to hugging face weights for SGLang.",
             )
             parser.add_argument(
+                "--dsa-attention-backend",
+                choices=["megatron-bridge", "slime"],
+                default="megatron-bridge",
+                help=(
+                    "DSA sparse-MLA kernel backend for GLM (glm_moe_dsa) under --megatron-to-hf-mode bridge. "
+                    "'megatron-bridge' (default) uses the portable unfused megatron-core kernels; 'slime' uses "
+                    "the fused TileLang kernels (SparseMLA + lighting_indexer) for rollout<->train numerical "
+                    "parity. No effect on non-DSA models or the 'raw' path."
+                ),
+            )
+            parser.add_argument(
                 "--extra-high-precision-layers-hf",
                 type=str,
                 nargs="*",
