@@ -61,6 +61,10 @@
 #      WANDB=on WANDB_API_KEY=xxxxxxxx WANDB_TEAM=my-team \
 #      bash scripts/run_glm5_lora_multinode.sh launch
 #    #    (WANDB=offline -> local only; WANDB=off -> no wandb. See the wandb knobs below.)
+#    #    DAPO-Math instead of gsm8k (run prepare with --task dapo-math first; long CoT):
+#    HEAD_IP=10.220.51.62 GPUS_PER_NODE=4 NUM_NODES=2 MODEL_NAME=GLM-5.2_5layer \
+#      TASK=dapo-math RESP_LEN=4096 \
+#      bash scripts/run_glm5_lora_multinode.sh launch   # add DAPO_DYNAMIC_SAMPLING=on on a real model
 #
 #    # 4. Monitor (head node):
 #    RAY_ADDRESS=http://$HEAD_IP:8265 ray job logs   $JOB_ID --follow
@@ -89,6 +93,9 @@ DSA_BACKEND="${DSA_BACKEND:-megatron-bridge}"  # unfused; use "slime" for fused 
 LORA_RANK="${LORA_RANK:-16}"
 NUM_ROLLOUT="${NUM_ROLLOUT:-50}"               # == number of train steps
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"           # keep ~NUM_ROLLOUT/SAVE_INTERVAL adapters (disk)
+TASK="${TASK:-gsm8k}"                          # example dataset: gsm8k | dapo-math (see run_glm5_lora.py)
+RESP_LEN="${RESP_LEN:-}"                        # optional --rollout-max-response-len; for dapo-math try 4096
+DAPO_DYNAMIC_SAMPLING="${DAPO_DYNAMIC_SAMPLING:-off}"  # on -> --dapo-dynamic-sampling (real model only; toy resamples forever)
 HF_CHECKPOINT="${HF_CHECKPOINT:-/cluster-storage/models/${MODEL_NAME}}"  # LOCAL dir, not a repo id
 DATA_DIR="${DATA_DIR:-/personal/datasets}"     # persistent (NOT /root, which is volatile)
 HF_HOME="${HF_HOME:-/cluster-storage/models}"
@@ -188,6 +195,12 @@ case "$ROLE" in
       echo "[launch] wandb: ${WANDB} (project auto=miles-run_glm5_lora unless overridden; key ${WANDB_API_KEY:+SET}${WANDB_API_KEY:-MISSING})"
     fi
 
+    # ----- task / dataset flags (gsm8k | dapo-math; see run_glm5_lora.py) -----
+    TASK_FLAGS="--task ${TASK}"
+    [[ -n "$RESP_LEN" ]] && TASK_FLAGS+=" --rollout-max-response-len ${RESP_LEN}"
+    [[ "$DAPO_DYNAMIC_SAMPLING" == "on" ]] && TASK_FLAGS+=" --dapo-dynamic-sampling"
+    echo "[launch] task=${TASK}${RESP_LEN:+ resp_len=${RESP_LEN}} dapo_dynamic_sampling=${DAPO_DYNAMIC_SAMPLING}"
+
     # NOTE: --num-gpus-per-node $GPUS_PER_NODE appears BOTH as the run_glm5_lora.py flag
     # (drives TP=EP via _get_parallel_config + --actor-num-gpus-per-node) AND inside
     # --extra-args (sets the miles/train.py value the rollout addr-allocator reads). They
@@ -200,6 +213,7 @@ case "$ROLE" in
       --num-gpus-per-node "${GPUS_PER_NODE}" \
       --num-rollout "${NUM_ROLLOUT}" \
       --data-dir "${DATA_DIR}" \
+      ${TASK_FLAGS} \
       ${WANDB_SCRIPT_FLAG} \
       --extra-args "--actor-num-nodes ${NUM_NODES} --num-gpus-per-node ${GPUS_PER_NODE} --save-interval ${SAVE_INTERVAL}${WANDB_EXTRA}"
 
