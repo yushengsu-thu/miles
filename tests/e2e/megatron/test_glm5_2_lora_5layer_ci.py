@@ -9,11 +9,12 @@ from tests.ci.ci_register import register_cuda_ci
 
 import miles.utils.external_utils.command_utils as U
 
-# Smoke test for the GLM-5.2 LoRA-via-Megatron-Bridge training path on the 7-layer toy
-# (jybsuper/GLM-5.2-7layer, 3 dense + 4 MoE). GLM-5.2 adds DSA *cross-layer index sharing*:
-# only the computing layers (Megatron 1-indexed 1,2,3,7) carry indexer weights; the skip
-# layers (4,5,6) reuse layer 3's top-k. The Megatron-Bridge GLM5 provider reads that schedule
-# from the HF config and builds CrossLayerDSAttention.
+# Smoke test for the GLM-5.2 LoRA-via-Megatron-Bridge training path on the 5-layer toy
+# (Pinaster/GLM-5.2_5layer, 3 dense + 2 MoE) -- the same toy as the full-FT CI
+# (test_glm5_2_744b_a40b_5layer_ci.py). GLM-5.2 adds DSA *cross-layer index sharing*: only the
+# computing layers (Megatron 1-indexed 1,2,3) carry indexer weights; the skip layers (4,5) reuse
+# layer 3's top-k. The Megatron-Bridge GLM5 provider reads that schedule from the HF config and
+# builds CrossLayerDSAttention.
 #
 # sglang does not yet serve the GLM-5.2 cross-layer (subset-indexer) checkpoint, so a live
 # rollout is unavailable. This exercises the *training* side (build CrossLayerDSAttention ->
@@ -31,7 +32,7 @@ _CI_EXTRA = "--ci-test --ci-disable-logprobs-checker --disable-weights-backuper"
 
 def _args() -> ScriptArgs:
     return ScriptArgs(
-        model_name="GLM-5.2-7layer",
+        model_name="GLM-5.2_5layer",
         num_nodes=1,
         num_gpus_per_node=4,
         num_rollout=1,
@@ -42,7 +43,7 @@ def _args() -> ScriptArgs:
 
 def prepare(args: ScriptArgs):
     U.exec_command(f"mkdir -p {args.output_dir}")
-    _prepare_download(args)  # download GLM-5.2-7layer + gsm8k
+    _prepare_download(args)  # download GLM-5.2_5layer + gsm8k
     # GLM-5.2 rollout is unavailable on sglang; replay a dump from GLM-5.1-6layer (shared
     # tokenizer/vocab). Run the 5.1 full rollout->train in an isolated subprocess so its Ray
     # cluster is torn down before the in-process GLM-5.2 train-only step.
@@ -50,7 +51,7 @@ def prepare(args: ScriptArgs):
 
 
 def execute(args: ScriptArgs):
-    _train(args)  # GLM-5.2-7layer train-only on the replayed dump
+    _train(args)  # GLM-5.2_5layer train-only on the replayed dump
 
 
 if __name__ == "__main__":

@@ -42,7 +42,7 @@ Supported model variants (HF checkpoint must be the native config,
 model_type=glm_moe_dsa / GlmMoeDsaForCausalLM):
   GLM-5.1 / GLM-5.2            full models
   GLM-5.1-6layer              6-layer GLM-5.1 prune (jybsuper/GLM-5.1-6layer)
-  GLM-5.2-7layer              7-layer GLM-5.2 prune (jybsuper/GLM-5.2-7layer)
+  GLM-5.2_5layer              5-layer GLM-5.2 prune (Pinaster/GLM-5.2_5layer; 3 dense + 2 MoE)
   GLM-5.1-4layer / -20layer   other GLM-5.1 prunes
 
 Usage (run ON the devbox; miles editable-installed under /personal):
@@ -50,7 +50,7 @@ Usage (run ON the devbox; miles editable-installed under /personal):
   # default (megatron-bridge / unfused) backend:
   python scripts/run_glm5_lora.py full-train --model-name GLM-5.1-6layer --num-gpus-per-node 4
   # fused slime backend (GLM-5.2 shown; works for GLM-5.1 too):
-  python scripts/run_glm5_lora.py full-train --model-name GLM-5.2-7layer \\
+  python scripts/run_glm5_lora.py full-train --model-name GLM-5.2_5layer \\
       --dsa-attention-backend slime --num-gpus-per-node 4
 
 GLM-5.2 rollout caveat: sglang does not yet serve the GLM-5.2 cross-layer (subset-indexer)
@@ -60,7 +60,7 @@ is validated train-only by replaying a dumped rollout (both toys share the GLM t
   python scripts/run_glm5_lora.py full-train --model-name GLM-5.1-6layer \\
       --extra-args "--dump-details /personal/dump51"
   # 2) train GLM-5.2 on that dump (no sglang)
-  python scripts/run_glm5_lora.py train --model-name GLM-5.2-7layer \\
+  python scripts/run_glm5_lora.py train --model-name GLM-5.2_5layer \\
       --extra-args "--load-debug-rollout-data /personal/dump51/rollout_data/0.pt"
 """
 
@@ -73,13 +73,13 @@ import miles.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
-# HF repos to download from (full models from zai-org; pruned toys from jybsuper).
+# HF repos to download from (full models from zai-org; pruned toys from jybsuper / Pinaster).
 # Variants absent here (e.g. -4layer/-20layer) are assumed already present at --hf-checkpoint.
 _HF_REPO = {
     "GLM-5.1": "zai-org/GLM-5.1",
     "GLM-5.1-6layer": "jybsuper/GLM-5.1-6layer",
     "GLM-5.2": "zai-org/GLM-5.2",
-    "GLM-5.2-7layer": "jybsuper/GLM-5.2-7layer",
+    "GLM-5.2_5layer": "Pinaster/GLM-5.2_5layer",
 }
 
 _MEGATRON_MODEL_TYPE = {
@@ -88,7 +88,7 @@ _MEGATRON_MODEL_TYPE = {
     "GLM-5.1-4layer": "glm5-744B-A40B_4layer",
     "GLM-5.1-20layer": "glm5-744B-A40B_20layer",
     "GLM-5.2": "glm5.2-744B-A40B",
-    "GLM-5.2-7layer": "glm5.2-744B-A40B_7layer",
+    "GLM-5.2_5layer": "glm5.2-744B-A40B_5layer",
 }
 
 # Explicit LoRA targets: standard attn + MLA + MLP/MoE, EXCLUDING the DSA indexer
@@ -105,7 +105,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
         "GLM-5.1-4layer",
         "GLM-5.1-20layer",
         "GLM-5.2",
-        "GLM-5.2-7layer",
+        "GLM-5.2_5layer",
     ] = "GLM-5.1-6layer"
     task: Literal["gsm8k"] = "gsm8k"
 
