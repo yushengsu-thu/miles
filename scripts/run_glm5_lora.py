@@ -181,6 +181,13 @@ def _get_parallel_config(args: ScriptArgs) -> str:
         kernels index by cu_seqlens and use a [t, heads, dim] layout; bshd has no cu_seqlens.
     """
     ngpu = args.num_gpus_per_node
+    # Canonical GLM-5 layout TP=EP=ngpu + sequence-parallel, CP=1 here (the full-scale recipe adds
+    # context-parallel + --allgather-cp). BOTH backends run with sequence-parallel: the slime fused
+    # thd indexer / SparseMLA path is SP/CP-aware in the bridge port -- slime_mla.py reconciles
+    # index_q/index_k/head_weights via SP(+CP) all-gather and cu_seqlens (starts/ends) via CP-scatter,
+    # mirroring native slime glm5.py, so the fused kernel sees matching token dims under SP. The only
+    # per-backend difference is the query layout: thd (packed, cu_seqlens-indexed) for slime, bshd
+    # for the unfused megatron-core core-attention.
     qkv_format = "thd" if args.dsa_attention_backend == "slime" else "bshd"
     return (
         f"--tensor-model-parallel-size {ngpu} --sequence-parallel --pipeline-model-parallel-size 1 "
