@@ -173,6 +173,10 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # rollout engine
     rollout_num_gpus_per_engine: int = 2  # rollout tp=2
     sglang_mem_fraction_static: float = 0.5
+    # fp8 rollout: serve sglang from a pre-converted _fp8 ckpt (tools/convert_hf_to_fp8.py). fp8
+    # halves rollout weight mem so the 744B model fits engine=8 (1 node); megatron TRAIN stays bf16
+    # (it dequantizes the fp8 HF base via the bridge). Point --hf-checkpoint at the _fp8 dir.
+    fp8_rollout: bool = False
 
     enable_wandb: bool = True
     # pass any extra miles/megatron/sglang args through, e.g. --extra-args '--lora-base-cpu-backup'
@@ -269,7 +273,15 @@ def _train(args: ScriptArgs):
         # = 32x ep -> "scheduler died during init"). User opted to drop BOTH. The MoE expert LoRA then
         # rides the default (non-virtual-experts) sglang path; at rollout 0 the expert-LoRA delta is
         # zero anyway (B=0), so this isolates the rollout config (dp-attention+nsa+INDEXER_ROPE_NEOX_STYLE=0).
-        lora_args += "--lora-base-cpu-backup --no-gradient-accumulation-fusion "
+        # NOTE: --lora-base-cpu-backup is intentionally NOT added here (opt-in only). It keeps a
+        # HOST-RAM mirror of the base weights on the sglang side (enable_weights_cpu_backup) so they
+        # survive torch_memory_saver.pause() without re-ship; but at full 744B scale on the slime
+        # backend that mirror (~372 GB/node) + megatron's slime init pushed the colocate pod past
+        # its ~1.78 TB cgroup memory.max -> RolloutManager SIGTERM'd (host OOM, NOT GPU) -> sglang
+        # dp-attn all_gather peers saw "connection reset" -> cluster-wide scheduler crash. Enable it
+        # via the run_glm5_lora_multinode.sh knob LORA_BASE_CPU_BACKUP=on (passed through --extra-args)
+        # only when host RAM allows. Trade-off when OFF: skip_base_sync=False -> trainer re-ships base per swap.
+        lora_args += "--no-gradient-accumulation-fusion "
 
     # Math RL (both tasks score with the boxed/SymPy verifier --rm-type math). Shared rollout
     # args; the per-task block sets --prompt-data + --input-key. Same task-dispatch shape as
@@ -320,14 +332,21 @@ def _train(args: ScriptArgs):
         # engine = ep = dp = rollout_num_gpus_per_engine (32 for full; bf16 ~1488GB needs >=~22/engine,
         # NOT the full-FT's fp8-only 8). NO deepep (fp8-gated there + conflicts with the triton LoRA
         # MoE runner), NO MTP. cuda-graph-max-bs stays 64 (256 risks bf16+dp graph-pool OOM).
-        _eng = args.rollout_num_gpus_per_engine
+        # fp8 rollout (PR#1376 GLM-5.2 recipe): engine = min(8, ngpu) — fp8 halves the weights so
+        # the 744B model fits 1 node; fp8 KV cache + flashmla_kv decode + cuda-graph-max-bs 256.
+        # bf16 rollout: engine = rollout_num_gpus_per_engine (32; bf16 ~1488GB needs ~22+/engine),
+        # flashmla_sparse decode, cuda-graph-max-bs 64.
+        _eng = min(8, args.num_gpus_per_node) if args.fp8_rollout else args.rollout_num_gpus_per_engine
+        _decode = "flashmla_kv" if args.fp8_rollout else "flashmla_sparse"
+        _cg = 256 if args.fp8_rollout else 64
+        _kv = "--sglang-kv-cache-dtype fp8_e4m3 " if args.fp8_rollout else ""
         sglang_args = (
             f"--rollout-num-gpus-per-engine {_eng} --sglang-mem-fraction-static {args.sglang_mem_fraction_static} "
             f"--sglang-enable-dp-attention --sglang-ep-size {_eng} --sglang-dp-size {_eng} "
             "--sglang-moe-dense-tp-size 1 --sglang-enable-dp-lm-head "
-            "--sglang-attention-backend nsa --sglang-nsa-decode-backend flashmla_sparse "
-            "--sglang-nsa-prefill-backend flashmla_sparse --sglang-page-size 64 "
-            "--sglang-cuda-graph-max-bs 64 --sglang-max-running-requests 512 "
+            f"--sglang-attention-backend nsa --sglang-nsa-decode-backend {_decode} "
+            f"--sglang-nsa-prefill-backend flashmla_sparse --sglang-page-size 64 {_kv}"
+            f"--sglang-cuda-graph-max-bs {_cg} --sglang-max-running-requests 512 "
             f"--sglang-chunked-prefill-size {2048 * _eng} --sglang-watchdog-timeout 3600 "
             "--sglang-moe-runner-backend triton --sglang-disable-shared-experts-fusion "
             # NOTE: --sglang-reasoning-parser/--sglang-tool-call-parser intentionally REMOVED
@@ -366,6 +385,12 @@ def _train(args: ScriptArgs):
             # Force the NSA/DSA MLA path in sglang (matches run_glm5_744b_a40b.py:357). Needed when
             # serving the full GLM-5.2 with --sglang-attention-backend nsa. Harmless on the toy.
             "SGLANG_NSA_FORCE_MLA": "1",
+            # NOTE: do NOT set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True here. It is mutually
+            # exclusive with torch_memory_saver (colocate offload): the saver's _sanity_checks()
+            # raises "TorchMemorySaver is disabled ... expandable_segments is not supported yet".
+            # The 744B DSA indexer OOM (mcore _compute_index_scores einsum, O(seq^2) [s,b,h,t] fp32
+            # ~8 GiB at seq 8192) must be solved by REDUCING the peak (CP>1 halves seq -> halves the
+            # indexer intermediate), not by changing the allocator backend.
         },
         megatron_path=args.megatron_path,
     )

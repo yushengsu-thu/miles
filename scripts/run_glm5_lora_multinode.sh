@@ -129,18 +129,46 @@ DAPO_DYNAMIC_SAMPLING="${DAPO_DYNAMIC_SAMPLING:-on}"  # on for a REAL model; off
 #   1488/32 = ~46GB weights/GPU at mem-frac 0.5, 2 engines on 64 GPU); toy -> 2.
 ROLLOUT_GPUS_PER_ENGINE="${ROLLOUT_GPUS_PER_ENGINE:-}"
 SGLANG_MEM_FRACTION="${SGLANG_MEM_FRACTION:-}"   # empty => run_glm5_lora.py default (0.5)
+# fp8 rollout: serve sglang from the pre-converted GLM-5.2_fp8 ckpt (engine=8, fp8 KV cache);
+# megatron TRAIN stays bf16 (dequantizes the fp8 HF base via the bridge). Needs the _fp8 dir
+# (tools/convert_hf_to_fp8.py). off => bf16 rollout (engine=32). NOTE: the gate_up LoRA crash is
+# orthogonal to fp8 — the MLP-target drop in run_glm5_lora.py still applies.
+FP8_ROLLOUT="${FP8_ROLLOUT:-off}"
 # sglang LoRA kernel backend (triton|csgmv|ascend|torch_native). sglang default is csgmv,
 # which has shown issues for the fused MLA (fused_qkv_a_proj_with_mqa) multi-slice path on
 # GLM-5.2 DSA -> rollout gibberish. triton is the more robust kernel. Passed via --extra-args
 # (run_glm5_lora.py does not expose it; train.py accepts --sglang-lora-backend). Empty => sglang default.
 SGLANG_LORA_BACKEND="${SGLANG_LORA_BACKEND:-triton}"
+# --lora-base-cpu-backup: keep a HOST-RAM mirror of the base weights on the sglang side
+# (enable_weights_cpu_backup) so they survive torch_memory_saver.pause() across rollout<->train
+# swaps without per-step re-ship. DEFAULT off: at full 744B on the slime backend the mirror
+# (~372 GB/node) + megatron's slime init blew the colocate pod past its ~1.78 TB cgroup
+# memory.max -> RolloutManager host-OOM (SIGTERM) -> sglang dp-attn all_gather "connection reset"
+# -> cluster-wide scheduler crash. Turn on only when host RAM is known to fit. Trade-off when off:
+# skip_base_sync=False so the trainer re-ships the base each swap (slower, but no host mirror).
+LORA_BASE_CPU_BACKUP="${LORA_BASE_CPU_BACKUP:-off}"
+# R3 = rollout routing replay (+ DSA indexer replay on the slime backend) for rollout<->train
+# on-policy parity. DEFAULT on. Turn OFF (R3=off -> --no-use-r3) to ELIMINATE sglang's host-side
+# replay capturers: indexer-topk (enable_return_indexer_topk, the ~78GB/rank pinned buffer that
+# host-OOM'd the colocate pod) AND routed-experts. With R3 off, --sglang-max-total-tokens can be
+# left at the sglang default (no host buffer to bound) for full rollout throughput; the train side
+# recomputes indexer top-k / MoE routing instead of replaying (off-policy in those dims -- fine for
+# e2e bring-up, but R3=on is wanted for a correctness-faithful RL run).
+R3="${R3:-on}"
 if [[ -z "$ROLLOUT_GPUS_PER_ENGINE" ]]; then
-  if [[ "$MODEL" == *5layer* ]]; then ROLLOUT_GPUS_PER_ENGINE=2; else ROLLOUT_GPUS_PER_ENGINE=32; fi
+  if [[ "$MODEL" == *5layer* ]]; then ROLLOUT_GPUS_PER_ENGINE=2
+  elif [[ "$FP8_ROLLOUT" == "on" ]]; then ROLLOUT_GPUS_PER_ENGINE=8   # fp8: 744B fits 1 node/engine
+  else ROLLOUT_GPUS_PER_ENGINE=32; fi
 fi
 # full bf16 GLM-5 rollout wants mem-fraction 0.70 (matches run_glm5_744b_a40b.py); toy stays at
 # run_glm5_lora.py's 0.5 default. Only auto-set when the user left it empty.
 [[ -z "$SGLANG_MEM_FRACTION" && "$MODEL" != *5layer* ]] && SGLANG_MEM_FRACTION=0.70
-HF_CHECKPOINT="${HF_CHECKPOINT:-/cluster-storage/models/${MODEL}}"  # LOCAL dir, not a repo id
+# NOTE: compute the _fp8 suffix on its own line. An inline $(...) that exits non-zero
+# (the `[[ ]] && echo` when FP8 is off) makes the surrounding assignment fail, and under
+# `set -e` that silently kills the launch before the banner (bf16 default + HF_CHECKPOINT unset).
+_FP8_SUFFIX=""
+[[ "$FP8_ROLLOUT" == "on" ]] && _FP8_SUFFIX="_fp8"
+HF_CHECKPOINT="${HF_CHECKPOINT:-/cluster-storage/models/${MODEL}${_FP8_SUFFIX}}"  # LOCAL dir; _fp8 for fp8 rollout
 DATA_DIR="${DATA_DIR:-/personal/datasets}"     # persistent (NOT /root)
 HF_HOME="${HF_HOME:-/cluster-storage/models}"
 JOB_ID="${JOB_ID:-glm5_lora_mn_$(date +%y%m%d-%H%M%S)}"
@@ -294,10 +322,14 @@ case "$ROLE" in
     [[ -n "$SEQ_EXTRA" ]] && EXTRA_ARGS+=" ${SEQ_EXTRA}"
     EXTRA_ARGS+="${RC_EXTRA}"
     [[ -n "$PARALLEL_EXTRA" ]] && EXTRA_ARGS+=" ${PARALLEL_EXTRA}"
-    # full bf16 path: alltoall MoE dispatcher (NOT deepep/flex — deepep is fp8-only and conflicts
-    # with the triton LoRA MoE runner). Toy keeps its default dispatcher.
-    [[ "$MODEL" != *5layer* ]] && EXTRA_ARGS+=" --moe-token-dispatcher-type alltoall"
+    # alltoall MoE dispatcher for ALL GLM-5 LoRA models incl. the 5-layer toy (NOT deepep/flex —
+    # deepep is fp8-only and conflicts with the triton LoRA MoE runner). Redundant for the actor
+    # (bridge_lora_helpers.py hardcodes provider.moe_token_dispatcher_type="alltoall") but kept
+    # explicit so the 5-layer toy's train.py command matches the full recipe exactly.
+    EXTRA_ARGS+=" --moe-token-dispatcher-type alltoall"
     [[ -n "$SGLANG_LORA_BACKEND" ]] && EXTRA_ARGS+=" --sglang-lora-backend ${SGLANG_LORA_BACKEND}"
+    # opt-in host-RAM base mirror (default off; see knob note above). argparse last-wins.
+    [[ "$LORA_BASE_CPU_BACKUP" == "on" ]] && EXTRA_ARGS+=" --lora-base-cpu-backup"
     EXTRA_ARGS+="${TRAINONLY_EXTRA}"
     EXTRA_ARGS+="${WANDB_EXTRA}"
     echo "[launch] --extra-args: ${EXTRA_ARGS}"
@@ -317,6 +349,8 @@ case "$ROLE" in
       --hf-checkpoint "${HF_CHECKPOINT}" \
       --dsa-attention-backend "${BACKEND}" \
       --lora-rank "${LORA_RANK}" \
+      $( [[ "$FP8_ROLLOUT" == "on" ]] && echo --fp8-rollout ) \
+      $( [[ "$R3" == "off" ]] && echo --no-use-r3 ) \
       --num-gpus-per-node "${GPUS_PER_NODE}" \
       --num-rollout "${NUM_ROLLOUT}" \
       --data-dir "${DATA_DIR}" \
