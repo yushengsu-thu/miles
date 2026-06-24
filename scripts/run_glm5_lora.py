@@ -240,7 +240,36 @@ def _train(args: ScriptArgs):
         f"--dsa-attention-backend {args.dsa_attention_backend} "
     )
 
-    lora_args = f'--lora-rank {args.lora_rank} --lora-alpha {args.lora_alpha} --lora-dropout {args.lora_dropout} --target-modules "{args.target_modules}" '
+    # Full GLM-5 (non-5layer) gets the MoE-LoRA rollout mechanism flags (Kimi K2.5 LoRA recipe,
+    # MINUS --experts-shared-outer-loras per directive): virtual-experts MoE-LoRA path, frozen
+    # base kept on CPU under colocate, no grad-accum-fusion. target-modules stays GLM's own
+    # default (the correct GLM-5.2 MLA superset; NOT Kimi's DeepSeek-named list). The 5-layer toy
+    # keeps the simple path unchanged.
+    # Apply the FULL GLM-5.2 rollout config (dp-attention / nsa / EP + MLP-target drop + MoE-LoRA
+    # flags + no reasoning/tool parser) to ALL GLM-5 models INCLUDING the 5-layer toy (per request).
+    # The 5-layer is glm_moe_dsa too, so it exercises the same DSA / dp-attention / LoRA serving
+    # path -> a fast (~seconds to load) way to validate the rollout sglang config without the full
+    # model's ~15-min load. Engine size / mem-fraction still come from the C0 script per model
+    # (5layer -> rollout-num-gpus-per-engine 2, mem-frac 0.5; full -> 32, 0.70). Set to
+    # `"5layer" not in args.model_name` to restore the old simple csgmv toy path.
+    _is_full = True
+    # (B) Full model: DROP gate_proj/up_proj/down_proj from the rollout LoRA targets. sglang's
+    # mem_pool LoRA-B buffer probe (mem_pool.py:359-383) fails to detect the fully-DP dense MLP
+    # gate_up (tp=1 under --sglang-moe-dense-tp-size 1) and falls back to the GLOBAL tp_size,
+    # sizing B as 24576/tp_size -> "LoRA B output dim != base partition prefix dim 24576" scheduler
+    # crash (orthogonal to fp8/engine-size/virtual-experts/max-lora-rank). LoRA only attention
+    # (q/k/v/o + MLA q_a/kv_a/q_b/kv_b) until the sglang probe is patched.
+    _tm = args.target_modules
+    if _is_full:
+        _tm = ",".join(m for m in _tm.split(",") if m.strip() not in ("gate_proj", "up_proj", "down_proj"))
+    lora_args = f'--lora-rank {args.lora_rank} --lora-alpha {args.lora_alpha} --lora-dropout {args.lora_dropout} --target-modules "{_tm}" '
+    if _is_full:
+        # NOTE: --sglang-lora-use-virtual-experts is DROPPED — it requires --experts-shared-outer-loras
+        # (matched pair; without it the MoE expert gate_up LoRA-B dim mismatches sglang, 768 vs 24576
+        # = 32x ep -> "scheduler died during init"). User opted to drop BOTH. The MoE expert LoRA then
+        # rides the default (non-virtual-experts) sglang path; at rollout 0 the expert-LoRA delta is
+        # zero anyway (B=0), so this isolates the rollout config (dp-attention+nsa+INDEXER_ROPE_NEOX_STYLE=0).
+        lora_args += "--lora-base-cpu-backup --no-gradient-accumulation-fusion "
 
     # Math RL (both tasks score with the boxed/SymPy verifier --rm-type math). Shared rollout
     # args; the per-task block sets --prompt-data + --input-key. Same task-dispatch shape as
@@ -285,7 +314,31 @@ def _train(args: ScriptArgs):
 
     perf_args = _get_parallel_config(args)
 
-    sglang_args = f"--rollout-num-gpus-per-engine {args.rollout_num_gpus_per_engine} --sglang-mem-fraction-static {args.sglang_mem_fraction_static} --sglang-cuda-graph-max-bs 64 --sglang-moe-runner-backend triton --sglang-disable-shared-experts-fusion --sglang-reasoning-parser glm45 --sglang-tool-call-parser glm47 "
+    if _is_full:
+        # FULL bf16 GLM-5.2 rollout: full-model sglang BASE (dp-attention + EP/DP + nsa/DSA +
+        # dp-lm-head, mirrors run_glm5_744b_a40b.py) + GLM parsers + MoE-LoRA triton backend.
+        # engine = ep = dp = rollout_num_gpus_per_engine (32 for full; bf16 ~1488GB needs >=~22/engine,
+        # NOT the full-FT's fp8-only 8). NO deepep (fp8-gated there + conflicts with the triton LoRA
+        # MoE runner), NO MTP. cuda-graph-max-bs stays 64 (256 risks bf16+dp graph-pool OOM).
+        _eng = args.rollout_num_gpus_per_engine
+        sglang_args = (
+            f"--rollout-num-gpus-per-engine {_eng} --sglang-mem-fraction-static {args.sglang_mem_fraction_static} "
+            f"--sglang-enable-dp-attention --sglang-ep-size {_eng} --sglang-dp-size {_eng} "
+            "--sglang-moe-dense-tp-size 1 --sglang-enable-dp-lm-head "
+            "--sglang-attention-backend nsa --sglang-nsa-decode-backend flashmla_sparse "
+            "--sglang-nsa-prefill-backend flashmla_sparse --sglang-page-size 64 "
+            "--sglang-cuda-graph-max-bs 64 --sglang-max-running-requests 512 "
+            f"--sglang-chunked-prefill-size {2048 * _eng} --sglang-watchdog-timeout 3600 "
+            "--sglang-moe-runner-backend triton --sglang-disable-shared-experts-fusion "
+            # NOTE: --sglang-reasoning-parser/--sglang-tool-call-parser intentionally REMOVED
+            # (per directive; the PR #1376 GLM-5.2 recipe does not set them).
+            # sglang must size the LoRA buffers to the real rank. Without --max-lora-rank,
+            # _get_lora_n_slices (= A_buffer.shape[-2] // lora_rank) miscounts the gate_up slices
+            # under dp-attention -> partition-prefix(24576) != B-out(768) "scheduler died" crash.
+            f"--sglang-max-lora-rank {args.lora_rank} "
+        )
+    else:
+        sglang_args = f"--rollout-num-gpus-per-engine {args.rollout_num_gpus_per_engine} --sglang-mem-fraction-static {args.sglang_mem_fraction_static} --sglang-cuda-graph-max-bs 64 --sglang-moe-runner-backend triton --sglang-disable-shared-experts-fusion --sglang-reasoning-parser glm45 --sglang-tool-call-parser glm47 "
 
     save_args = f"--save-interval 1 --save {load_save_path} "
 
@@ -300,7 +353,20 @@ def _train(args: ScriptArgs):
         config=args,
         num_gpus_per_node=args.num_gpus_per_node,
         megatron_model_type=args.megatron_model_type,
-        extra_env_vars={"MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1"},
+        extra_env_vars={
+            "MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1",
+            # GLM-5 (glm_moe_dsa) DSA indexer uses INTERLEAVED RoPE, not NeoX. sglang must
+            # match or the sparse-attention top-k index is computed on wrongly-rotated q/k ->
+            # the indexer selects the wrong tokens -> rollout produces gibberish on long
+            # sequences (short prompts < index_topk don't trigger the indexer, which is why a
+            # short-prompt base server looked fine). run_glm5_744b_a40b.py:403 sets this for the
+            # full model; the LoRA wrapper was missing it (the 5-layer toy masked it -- a 5/78
+            # prune is gibberish regardless). See run_deepseek_v32.py:262 (v3.2=NeoX, GLM-5=interleaved).
+            "INDEXER_ROPE_NEOX_STYLE": "0",
+            # Force the NSA/DSA MLA path in sglang (matches run_glm5_744b_a40b.py:357). Needed when
+            # serving the full GLM-5.2 with --sglang-attention-backend nsa. Harmless on the toy.
+            "SGLANG_NSA_FORCE_MLA": "1",
+        },
         megatron_path=args.megatron_path,
     )
 
