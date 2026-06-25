@@ -113,7 +113,7 @@ TASK="${TASK:-dapo-math}"                       # dataset: dapo-math | gsm8k
 # Seq window (--seq-length + --rollout-max-context-len). The rollout caps generation at
 # min(RESP_LEN, SEQ - prompt), so a window LARGER than RESP_LEN hard-bounds prompt+response (and the
 # colocate memory window). dapo: 8192 (RESP 4096 + prompt headroom -> total can never exceed 8192).
-# gsm8k: leave UNSET -- 256-tok responses sit well within megatron's window. NB: an unset SEQ is NOT
+# gsm8k: leave UNSET -- 512-tok responses sit well within megatron's window. NB: an unset SEQ is NOT
 # the model's native max -- miles defaults --seq-length to a flat 4096 (megatron_utils/arguments.py).
 if [[ "$TASK" == "dapo-math" ]]; then SEQ="${SEQ:-8192}"; else SEQ="${SEQ:-}"; fi
 # ----------------------------------------------------------------------------
@@ -122,7 +122,7 @@ RAY_PORT="${RAY_PORT:-6379}"
 DASH_PORT="${DASH_PORT:-8265}"
 NUM_ROLLOUT="${NUM_ROLLOUT:-50}"               # == number of train steps
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"           # keep ~NUM_ROLLOUT/SAVE_INTERVAL adapters
-if [[ "$TASK" == "dapo-math" ]]; then RESP_LEN="${RESP_LEN:-4096}"; elif [[ "$TASK" == "gsm8k" ]]; then RESP_LEN="${RESP_LEN:-256}"; else RESP_LEN="${RESP_LEN:-7168}"; fi  # --rollout-max-response-len: dapo long-CoT 4096 (>2048 -> DSA indexer SPARSE), gsm8k short-answer 256
+if [[ "$TASK" == "dapo-math" ]]; then RESP_LEN="${RESP_LEN:-4096}"; elif [[ "$TASK" == "gsm8k" ]]; then RESP_LEN="${RESP_LEN:-512}"; else RESP_LEN="${RESP_LEN:-7168}"; fi  # --rollout-max-response-len: dapo long-CoT 4096 (>2048 -> DSA indexer SPARSE), gsm8k short-answer 512
 DAPO_DYNAMIC_SAMPLING="${DAPO_DYNAMIC_SAMPLING:-on}"  # on for a REAL model; off for gsm8k/toy smoke
 
 # ----- rollout (sglang) engine size — CRITICAL for the FULL 744B model -----

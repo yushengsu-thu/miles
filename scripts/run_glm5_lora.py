@@ -160,12 +160,12 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # (and thus exercises the cross-layer DSA path) only when the full sequence (prompt + response)
     # EXCEEDS 2048; at shorter seq (the gsm8k default below) the indexer degenerates to DENSE
     # (top-k >= seq -> selects all keys). Use a longer prompt/response (> 2048) to hit sparse indexing.
-    rollout_max_response_len: int = 0  # 0 => per-task default (gsm8k 256, dapo-math 4096); see __post_init__
+    rollout_max_response_len: int = 0  # 0 => per-task default (gsm8k 512, dapo-math 4096); see __post_init__
     # seq window: emitted as --seq-length + --rollout-max-context-len when > 0; 0 => per-task default
     # in __post_init__. The rollout caps generation at min(response_len, seq_window - prompt), so a
     # window > response_len HARD-bounds prompt+response (and the colocate memory window):
     #   dapo-math -> 8192 (resp 4096 fits with prompt headroom; total can never exceed 8192)
-    #   gsm8k     -> 0 (UNSET: 256-tok responses sit well within megatron's default 4096 train window)
+    #   gsm8k     -> 0 (UNSET: 512-tok responses sit well within megatron's default 4096 train window)
     seq_window: int = 0
     global_batch_size: int = 16
 
@@ -199,9 +199,9 @@ class ScriptArgs(U.ExecuteTrainConfig):
             # `python run_glm5_lora.py --task ...` correct on its own). NB: no --seq-length /
             # --rollout-max-context-len is set here -- the total seq window auto-derives from the
             # model config; only the generation budget is capped:
-            #   gsm8k     -> 256  (short-answer; seq < index_topk 2048 so the DSA indexer is DENSE)
+            #   gsm8k     -> 512  (short-answer; seq < index_topk 2048 so the DSA indexer is DENSE)
             #   dapo-math -> 4096 (long-CoT; >2048 seq makes the GLM-5.2 DSA indexer go SPARSE)
-            self.rollout_max_response_len = 4096 if self.task == "dapo-math" else 256
+            self.rollout_max_response_len = 4096 if self.task == "dapo-math" else 512
         if self.seq_window == 0 and self.task == "dapo-math":
             # dapo response (4096) must leave room for the prompt within the train window, and the
             # colocate window must be bounded -> set an 8192 window (gsm8k stays 0/unset: tiny seq).

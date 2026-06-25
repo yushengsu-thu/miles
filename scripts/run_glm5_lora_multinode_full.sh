@@ -96,10 +96,10 @@ export TASK="${TASK:-dapo-math}"                 # dataset: dapo-math | gsm8k
 # The rollout caps generation at min(RESP_LEN, SEQ - prompt), so a window > RESP_LEN hard-bounds
 # prompt+response (and the colocate memory window):
 #   dapo-math -> SEQ 8192 / RESP 4096  (window > response: prompt headroom; total can never exceed 8192)
-#   gsm8k     -> SEQ unset / RESP 256  (256-tok answers sit well within megatron's window)
+#   gsm8k     -> SEQ unset / RESP 512  (512-tok answers sit well within megatron's window)
 # NB: "SEQ unset" = miles' flat 4096 --seq-length default, NOT the model's native max context.
 if [[ "$TASK" == "gsm8k" ]]; then
-  export RESP_LEN="${RESP_LEN:-256}"
+  export RESP_LEN="${RESP_LEN:-512}"
 else
   export SEQ="${SEQ:-8192}"; export RESP_LEN="${RESP_LEN:-4096}"
 fi
