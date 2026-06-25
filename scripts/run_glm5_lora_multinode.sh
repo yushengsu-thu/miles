@@ -110,10 +110,12 @@ NUM_NODES="$NODES"                              # internal canonical alias
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"             # REAL GPUs per node (==> TP=EP=this intra-node)
 LORA_RANK="${LORA_RANK:-16}"
 TASK="${TASK:-dapo-math}"                       # dataset: dapo-math | gsm8k
-# NO seq-length default: leave SEQ empty so --seq-length/--rollout-max-context-len are OMITTED and
-# the total window auto-derives from the model config (matches how the other miles examples run --
-# they set only the response budget). Set SEQ=<n> explicitly only to cap window/memory (e.g. colocate).
-SEQ="${SEQ:-}"
+# Seq window (--seq-length + --rollout-max-context-len). The rollout caps generation at
+# min(RESP_LEN, SEQ - prompt), so a window LARGER than RESP_LEN hard-bounds prompt+response (and the
+# colocate memory window). dapo: 8192 (RESP 4096 + prompt headroom -> total can never exceed 8192).
+# gsm8k: leave UNSET -- 256-tok responses sit well within megatron's window. NB: an unset SEQ is NOT
+# the model's native max -- miles defaults --seq-length to a flat 4096 (megatron_utils/arguments.py).
+if [[ "$TASK" == "dapo-math" ]]; then SEQ="${SEQ:-8192}"; else SEQ="${SEQ:-}"; fi
 # ----------------------------------------------------------------------------
 
 RAY_PORT="${RAY_PORT:-6379}"

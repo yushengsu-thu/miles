@@ -161,6 +161,12 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # EXCEEDS 2048; at shorter seq (the gsm8k default below) the indexer degenerates to DENSE
     # (top-k >= seq -> selects all keys). Use a longer prompt/response (> 2048) to hit sparse indexing.
     rollout_max_response_len: int = 0  # 0 => per-task default (gsm8k 256, dapo-math 4096); see __post_init__
+    # seq window: emitted as --seq-length + --rollout-max-context-len when > 0; 0 => per-task default
+    # in __post_init__. The rollout caps generation at min(response_len, seq_window - prompt), so a
+    # window > response_len HARD-bounds prompt+response (and the colocate memory window):
+    #   dapo-math -> 8192 (resp 4096 fits with prompt headroom; total can never exceed 8192)
+    #   gsm8k     -> 0 (UNSET: 256-tok responses sit well within megatron's default 4096 train window)
+    seq_window: int = 0
     global_batch_size: int = 16
 
     # DAPO dynamic sampling (only used when task="dapo-math") -- DAPO's signature trick: drop
@@ -196,6 +202,10 @@ class ScriptArgs(U.ExecuteTrainConfig):
             #   gsm8k     -> 256  (short-answer; seq < index_topk 2048 so the DSA indexer is DENSE)
             #   dapo-math -> 4096 (long-CoT; >2048 seq makes the GLM-5.2 DSA indexer go SPARSE)
             self.rollout_max_response_len = 4096 if self.task == "dapo-math" else 256
+        if self.seq_window == 0 and self.task == "dapo-math":
+            # dapo response (4096) must leave room for the prompt within the train window, and the
+            # colocate window must be bounded -> set an 8192 window (gsm8k stays 0/unset: tiny seq).
+            self.seq_window = 8192
 
     @property
     def megatron_model_type(self) -> str:
@@ -384,7 +394,12 @@ def _train(args: ScriptArgs):
 
     wandb_args = U.get_default_wandb_args(__file__, run_id=args.run_id) if args.enable_wandb else ""
 
-    train_args = f"{ckpt_args} {lora_args} {rollout_args} {optimizer_args} {grpo_args} {r3_args} {wandb_args} {perf_args} {sglang_args} {save_args} {misc_args} {args.extra_args} "
+    # seq window (training --seq-length + rollout --rollout-max-context-len). Omitted when seq_window
+    # == 0 so megatron falls back to its default 4096 window (fine for the short gsm8k case). The .sh
+    # wrappers may also pass these via --extra-args; argparse takes the last occurrence (env wins).
+    seq_args = f"--seq-length {args.seq_window} --rollout-max-context-len {args.seq_window} " if args.seq_window > 0 else ""
+
+    train_args = f"{ckpt_args} {lora_args} {rollout_args} {seq_args} {optimizer_args} {grpo_args} {r3_args} {wandb_args} {perf_args} {sglang_args} {save_args} {misc_args} {args.extra_args} "
 
     U.execute_train(
         train_args=train_args,
