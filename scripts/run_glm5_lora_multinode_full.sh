@@ -85,6 +85,13 @@ export SEQ="${SEQ:-4096}"                        # dapo-math sweet spot (rollout
                                                  #   returns past 4096 at 2x rollout time). Bump SEQ=8192 for max signal.
 export RESP_LEN="${RESP_LEN:-3584}"              # response budget within seq 4096 (leaves ~512 for the prompt)
 export TASK="${TASK:-dapo-math}"
+# Dynamic sampling (check_reward_nonzero_std filter) DEFAULT OFF here. At the current reward /
+# truncation levels (seq 4096 dapo: raw_reward ~0.25, ~75% truncated -> many groups are all-zero
+# = zero-std), the filter rejects most groups and RESAMPLES indefinitely, so rollout 0 never
+# fills a batch and training never starts. Off => rollout uses the fixed batch and proceeds to
+# train every step (GRPO still learns from the mixed-reward groups). Re-enable (DAPO_DYNAMIC_SAMPLING=on)
+# once rewards are dense enough (longer seq / a partially-trained policy) that zero-std groups are rare.
+export DAPO_DYNAMIC_SAMPLING="${DAPO_DYNAMIC_SAMPLING:-off}"
 export NUM_ROLLOUT="${NUM_ROLLOUT:-50}"
 export HF_CHECKPOINT="${HF_CHECKPOINT:-/cluster-storage/models/${MODEL}}"
 # TP8 x DP8 / PP1 / CP1 / EP32 -- the only validated full-model layout.
