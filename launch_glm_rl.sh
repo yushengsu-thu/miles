@@ -86,7 +86,7 @@ MODEL_ARGS=(
 )
 TRAIN_ARGS=(
   --hf-checkpoint "$HF_CHECKPOINT" --megatron-to-hf-mode bridge --dsa-attention-backend "$BACKEND"
-  --lora-rank 4 --lora-alpha 8 --lora-dropout 0.0
+  --lora-rank 8 --lora-alpha 16 --lora-dropout 0.0
   # LoRA targets = attention (q/k/v/o + MLA q_a/kv_a/q_b/kv_b) + MoE experts (gate/up/down, which the
   # bridge maps to Megatron linear_fc1/linear_fc2). MoE-expert LoRA needs BOTH flags below ON together
   # or the sglang rollout crashes ("scheduler died": expert gate_up LoRA-B dim vs base mismatch under
