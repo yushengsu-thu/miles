@@ -84,16 +84,31 @@ MODEL_ARGS=(
   --multi-latent-attention --q-lora-rank 2048 --kv-lora-rank 512 --qk-head-dim 192 --v-head-dim 256
   --kv-channels 192 --qk-pos-emb-head-dim 64 --vocab-size 154880 --rotary-base 8000000 --enable-experimental
 )
+
+# MoE-expert LoRA layer scope (OOM control). The bare names gate_proj/up_proj/down_proj put LoRA on
+# ALL 75 MoE layers, whose grouped-GEMM backward activations (recompute is OFF on bshd) OOM the
+# step-0 backward at full 744B (rank GPU hits ~100%). Restrict to the LAST $MOE_LORA_LAST_N MoE layers
+# via Megatron-Bridge ModuleMatcher wildcards (*.layers.<N>.*.linear_fc1/linear_fc2). Attention LoRA
+# stays on all layers. Set MOE_LORA_LAST_N=0 to LoRA every MoE layer (bare names, the OOM-prone path).
+MOE_LORA_LAST_N="${MOE_LORA_LAST_N:-10}"
+ATTN_TM="q_proj,k_proj,v_proj,o_proj,q_a_proj,kv_a_proj_with_mqa,q_b_proj,kv_b_proj"
+if [ "${MOE_LORA_LAST_N:-0}" -gt 0 ] 2>/dev/null && [ "$MOE_LORA_LAST_N" -lt 78 ]; then
+  MOE_TM=""; for n in $(seq $((78 - MOE_LORA_LAST_N)) 77); do MOE_TM="$MOE_TM,*.layers.$n.*.linear_fc1,*.layers.$n.*.linear_fc2"; done
+  TARGET_MODULES="${ATTN_TM}${MOE_TM}"
+else
+  TARGET_MODULES="${ATTN_TM},gate_proj,up_proj,down_proj"
+fi
+
 TRAIN_ARGS=(
   --hf-checkpoint "$HF_CHECKPOINT" --megatron-to-hf-mode bridge --dsa-attention-backend "$BACKEND"
   --lora-rank 8 --lora-alpha 16 --lora-dropout 0.0
-  # LoRA targets = attention (q/k/v/o + MLA q_a/kv_a/q_b/kv_b) + MoE experts (gate/up/down, which the
-  # bridge maps to Megatron linear_fc1/linear_fc2). MoE-expert LoRA needs BOTH flags below ON together
-  # or the sglang rollout crashes ("scheduler died": expert gate_up LoRA-B dim vs base mismatch under
-  # EP=32 / dp-attention):
+  # LoRA targets = attention (all layers) + MoE experts (last MOE_LORA_LAST_N layers; TARGET_MODULES
+  # built above). MUST stay quoted -- the *.layers.N.* wildcards would otherwise glob-expand in bash.
+  # MoE-expert LoRA needs BOTH flags below ON together or the sglang rollout crashes ("scheduler died":
+  # expert gate_up LoRA-B dim vs base mismatch under EP=32 / dp-attention):
   #   --experts-shared-outer-loras       (TRAIN side; arguments.py auto-mirrors --sglang-experts-shared-outer-loras)
   #   --sglang-lora-use-virtual-experts  (SERVE side; in the sglang block below) -- NOT auto-set, added explicitly.
-  --target-modules q_proj,k_proj,v_proj,o_proj,q_a_proj,kv_a_proj_with_mqa,q_b_proj,kv_b_proj,gate_proj,up_proj,down_proj
+  --target-modules "$TARGET_MODULES"
   --experts-shared-outer-loras
   --no-gradient-accumulation-fusion
   --rm-type math --prompt-data "$DATA_DIR/gsm8k/train.parquet" --input-key messages --label-key label
@@ -226,7 +241,7 @@ case "$ROLE" in
     pkill -9 sglang || true; sleep 3; pkill -9 miles || true; sleep 3; pkill -9 miles || true; pkill -9 redis || true; true
     export RAY_ADDRESS="http://$HEAD_IP:$DASH_PORT" PYTHONUNBUFFERED=1 HF_HOME=/cluster-storage/models
     RUNTIME_ENV_JSON="$(cat <<JSON
-{"env_vars":{"PYTHONPATH":"$MEGATRON_PATH","CUDA_DEVICE_MAX_CONNECTIONS":"1","NCCL_NVLS_ENABLE":"1","NCCL_SOCKET_IFNAME":"$NCCL_IFNAME","GLOO_SOCKET_IFNAME":"$NCCL_IFNAME","no_proxy":"127.0.0.1,127.0.0.1","MASTER_ADDR":"127.0.0.1","MILES_EXPERIMENTAL_ROLLOUT_REFACTOR":"1","INDEXER_ROPE_NEOX_STYLE":"0","SGLANG_NSA_FORCE_MLA":"1"}}
+{"env_vars":{"PYTHONPATH":"$MEGATRON_PATH","CUDA_DEVICE_MAX_CONNECTIONS":"1","NCCL_NVLS_ENABLE":"1","NCCL_SOCKET_IFNAME":"$NCCL_IFNAME","GLOO_SOCKET_IFNAME":"$NCCL_IFNAME","no_proxy":"127.0.0.1,127.0.0.1","MASTER_ADDR":"127.0.0.1","MILES_EXPERIMENTAL_ROLLOUT_REFACTOR":"1","INDEXER_ROPE_NEOX_STYLE":"0","SGLANG_NSA_FORCE_MLA":"1","NVSHMEM_DISABLE_NCCL":"0"}}
 JSON
 )"
     echo "[launch] JOB_ID=$JOB_ID RUN_ID=$RUN_ID BACKEND=$BACKEND qkv=$QKV_FORMAT recompute=$RECOMPUTE -> $TRAIN_PY"
