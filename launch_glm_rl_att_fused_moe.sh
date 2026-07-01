@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  launch_glm_rl.sh — one-command multi-node GLM-5.2 (744B) attention-only LoRA RL,
+#  launch_glm_rl_att_fused_moe.sh — one-command multi-node GLM-5.2 (744B) LoRA RL:
+#  megatron-bridge (unfused) attention LoRA + FUSED MoE-expert LoRA (shared-outer + virtual-experts).
 #  wired to the miles_lora rx-devbox flow (devbox_config.sh / rx devbox run --rank N).
 #
 #  One-line launch of the whole multi-node training from your local box (the one with rx):
-#     RX_GPU_COUNT=64 RX_DEVBOX_NAME=miles-exp WANDB_API_KEY=xxx bash launch_glm_rl.sh
+#     RX_GPU_COUNT=64 RX_DEVBOX_NAME=miles-exp WANDB_API_KEY=xxx bash launch_glm_rl_att_fused_moe.sh
 #
-#  DSA backend default = unfused (megatron-bridge). Switch to fused: BACKEND=slime bash launch_glm_rl.sh
+#  DSA backend default = unfused (megatron-bridge). Switch to fused: BACKEND=slime bash launch_glm_rl_att_fused_moe.sh
 #
 #  Other roles (the orchestrator calls these on each pod automatically; usually no manual use):
-#     bash launch_glm_rl.sh head|worker|launch        # run on a pod
-#     bash launch_glm_rl.sh stop                       # abort the job (keep the nodes)
+#     bash launch_glm_rl_att_fused_moe.sh head|worker|launch    # run on a pod
+#     bash launch_glm_rl_att_fused_moe.sh stop                  # abort the job (keep the nodes)
 #
 #  PREREQ: nodes acquired via 0_launch_node.sh, this repo synced to /personal/miles via
 #          1_sync_files.sh, and every rank installed via 2_pre-install.sh (or PREINSTALL=1 here).
@@ -36,7 +37,7 @@ REMOTE_ROOT="${REMOTE_ROOT:-/personal}"
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"                       # 8 GPU per H200 node
 NODES="${NODES:-$(( ${RX_GPU_COUNT:-8} / GPUS_PER_NODE ))}"; [ "$NODES" -ge 1 ] || NODES=1
 REPO_DIR="${REPO_DIR:-$REMOTE_ROOT/miles}"
-SCRIPT_NAME="${SCRIPT_NAME:-launch_glm_rl.sh}"
+SCRIPT_NAME="${SCRIPT_NAME:-launch_glm_rl_att_fused_moe.sh}"
 HEAD_IP="${HEAD_IP:-}"                                    # empty => auto-detect
 NCCL_IFNAME="${NCCL_IFNAME:-bond0}"
 RAY_PORT="${RAY_PORT:-6379}"; DASH_PORT="${DASH_PORT:-8265}"
@@ -63,8 +64,8 @@ DATA_DIR="${DATA_DIR:-/personal/datasets}"
 MEGATRON_PATH="${MEGATRON_PATH:-/root/Megatron-LM}"
 TRAIN_PY="${TRAIN_PY:-$REPO_DIR/train.py}"
 RUN_ID="${RUN_ID:-$(date -u +%y%m%d-%H%M%S)-$(printf '%03d' $((RANDOM % 1000)))}"
-JOB_ID="${JOB_ID:-glm5_full_lora_rl_$(date +%y%m%d-%H%M%S)}"
-WANDB="${WANDB:-online}"; WANDB_PROJECT="${WANDB_PROJECT:-miles-run_glm5_lora}"
+JOB_ID="${JOB_ID:-glm5_att_fused_moe_lora_rl_$(date +%y%m%d-%H%M%S)}"
+WANDB="${WANDB:-online}"; WANDB_PROJECT="${WANDB_PROJECT:-miles-glm5_att_fused_moe}"
 
 # ════════════════════════════════════════════════════════════════════════════
 #  UPPER HALF — train.py args (only backend/qkv-format/recompute follow the switches above; rest fixed)
@@ -162,7 +163,7 @@ _detect_head_ip() {
 }
 _pod() {  # _pod <rank> "<env prefix>" <role>
   rx devbox run "$RX_DEVBOX_NAME" --rank "$1" -- bash -lc \
-    "cd '$REPO_DIR' && HEAD_IP='$HEAD_IP' NODES='$NODES' GPUS_PER_NODE='$GPUS_PER_NODE' NCCL_IFNAME='$NCCL_IFNAME' RAY_PORT='$RAY_PORT' DASH_PORT='$DASH_PORT' $2 bash '$SCRIPT_NAME' $3"
+    "cd '$REPO_DIR' && HEAD_IP='$HEAD_IP' NODES='$NODES' GPUS_PER_NODE='$GPUS_PER_NODE' NCCL_IFNAME='$NCCL_IFNAME' RAY_PORT='$RAY_PORT' DASH_PORT='$DASH_PORT' TOY='${TOY:-0}' $2 bash '$SCRIPT_NAME' $3"
 }
 
 case "$ROLE" in
@@ -200,7 +201,7 @@ case "$ROLE" in
     fi
 
     echo "[all] starting ray head (rank 0)"; _pod 0 "" head
-    for r in $(seq 1 $((NODES - 1))); do echo "[all] joining worker rank $r"; _pod "$r" "" worker; done
+    for ((r = 1; r < NODES; r++)); do echo "[all] joining worker rank $r"; _pod "$r" "" worker; done
 
     echo "[all] waiting for $NODES nodes to register ..."
     while :; do
