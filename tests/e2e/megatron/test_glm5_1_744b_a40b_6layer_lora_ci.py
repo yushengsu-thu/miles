@@ -1,6 +1,6 @@
 import os
 
-from scripts.run_glm5_lora import (
+from scripts.run_glm5_1_744b_a40b_lora import (
     ScriptArgs,
     _prepare_download,
     _train,
@@ -10,7 +10,7 @@ from tests.ci.ci_register import register_cuda_ci
 import miles.utils.external_utils.command_utils as U
 
 # Smoke test for the GLM-5.1 LoRA-via-Megatron-Bridge training script
-# (scripts/run_glm5_lora.py, --megatron-to-hf-mode bridge). Runs the full
+# (scripts/run_glm5_1_744b_a40b_lora.py, --megatron-to-hf-mode bridge). Runs the full
 # rollout -> train -> save loop on the 6-layer toy (jybsuper/GLM-5.1-6layer,
 # 3 dense + 3 MoE) with a tiny gsm8k rollout. Exercises the DSA bridge-LoRA path
 # (MLA + lightning indexer, indexer excluded from LoRA targets). Verifies the

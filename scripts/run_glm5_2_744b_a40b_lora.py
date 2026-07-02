@@ -1,7 +1,14 @@
 """
-GLM-5 / 5.1 / 5.2 GRPO LoRA training script (Megatron-Bridge / bridge mode).
+GLM-5.2 744B-A40B GRPO LoRA training script (Megatron-Bridge / bridge mode).
 
-These models are MoE + MLA + DSA (DeepSeek Sparse Attention). LoRA trains through the
+Per-model split of ``scripts/run_glm5_lora.py`` following the PR #1376 convention
+(one run script per model + a dedicated ``scripts/models/*.sh`` registry). This file
+covers GLM-5.2 only; GLM-5.1 lives in ``scripts/run_glm5_1_744b_a40b_lora.py``.
+The model-name -> megatron_model_type mapping points at the LoRA registries:
+  GLM-5.2        -> scripts/models/glm5.2-744B-A40B_lora.sh
+  GLM-5.2_5layer -> scripts/models/glm5.2-744B-A40B_5layer_lora.sh
+
+GLM-5.2 is MoE + MLA + DSA (DeepSeek Sparse Attention). LoRA trains through the
 Megatron-Bridge path (``--megatron-to-hf-mode bridge``); the "dsa" experimental-attention
 spec is provided by the Megatron-Bridge GLM5 provider, so NO ``--spec`` is consumed here
 (the registry ``.sh`` may still list it; it is provably inert under bridge LoRA).
@@ -10,7 +17,7 @@ GLM-5.2 additionally has DSA *cross-layer index sharing* (only "computing" layer
 indexer; "skip" layers reuse the most recent computing layer's top-k). The Megatron-Bridge
 GLM5 provider reads that schedule (``index_topk_freq``) from the HF config and builds
 ``CrossLayerDSAttention`` -- nothing extra is needed here beyond selecting a GLM-5.2 model
-name (which maps to the ``glm5.2-744B-A40B*`` registry, identical to GLM-5.1 except
+name (the ``glm5.2-744B-A40B*_lora`` registries are identical to the GLM-5.1 ones except
 ``--rotary-base`` 8e6).
 
 Modeled on ``scripts/run_deepseek_v4.py`` (typer app + ScriptArgs(ExecuteTrainConfig)
@@ -18,21 +25,23 @@ Modeled on ``scripts/run_deepseek_v4.py`` (typer app + ScriptArgs(ExecuteTrainCo
 
 DSA kernel backend (``--dsa-attention-backend``; bridge path only). Orthogonal to model version
 and to LoRA -- BOTH backends run GLM-5.1 *and* GLM-5.2, full or LoRA:
-  * ``megatron-bridge`` (default): the portable unfused megatron-core DSA kernels (DSAttention /
+  * ``slime`` (default): the vendored fused TileLang kernels (SparseMLA + lighting_indexer),
+    matching slime's rollout kernels for rollout<->train numerical parity (incl. R3 indexer
+    replay). Needs the optional ``tilelang`` dep and the ``thd`` (packed) layout.
+    Training/forward-only (no KV cache): it cannot serve generation -- the rollout is always
+    served by sglang.
+  * ``megatron-bridge``: the portable unfused megatron-core DSA kernels (DSAttention /
     CrossLayerDSAttention). No extra deps. Uses the ``bshd`` query layout.
-  * ``slime``: the vendored fused TileLang kernels (SparseMLA + lighting_indexer), matching slime's
-    rollout kernels for rollout<->train numerical parity (incl. R3 indexer replay). Needs the
-    optional ``tilelang`` dep and the ``thd`` (packed) layout. Training/forward-only (no KV cache):
-    it cannot serve generation -- the rollout is always served by sglang.
   This launcher selects the matching ``--qkv-format`` automatically from the backend (see
-  ``_get_parallel_config``); just pass ``--dsa-attention-backend slime`` or leave the default. See
-  the Megatron-Bridge ``models/glm_moe_dsa/__init__.py`` docstring for the full backend matrix.
+  ``_get_parallel_config``); just pass ``--dsa-attention-backend megatron-bridge`` or leave the
+  default. See the Megatron-Bridge ``models/glm_moe_dsa/__init__.py`` docstring for the full
+  backend matrix.
 
 Two DSA specifics:
   * ``--target-modules`` excludes the 3 DSA indexer modules (wq_b/wk/weights_proj) by default --
     the indexer stays a frozen base capability; this run does not train it. On the slime backend the
-    indexer adapter gets no gradient anyway (a genuine no-op); on the default backend it would get a
-    tiny aux-loss gradient (~1e-5), so excluding it there is a deliberate choice.
+    indexer adapter gets no gradient anyway (a genuine no-op); on the megatron-bridge backend it
+    would get a tiny aux-loss gradient (~1e-5), so excluding it there is a deliberate choice.
   * ``--micro-batch-size 1`` (no ``--use-dynamic-batch-size``): both backends pin a static
     micro-batch. The query layout follows the backend -- ``bshd`` (megatron-core's DSA
     core-attention needs a 4D query; the default ``thd`` packing yields a 3D query and raises "not
@@ -40,31 +49,32 @@ Two DSA specifics:
 
 Supported model variants (HF checkpoint must be the native config,
 model_type=glm_moe_dsa / GlmMoeDsaForCausalLM):
-  GLM-5.1 / GLM-5.2            full models
-  GLM-5.1-6layer              6-layer GLM-5.1 prune (jybsuper/GLM-5.1-6layer)
-  GLM-5.2_5layer              5-layer GLM-5.2 prune (Pinaster/GLM-5.2_5layer; 3 dense + 2 MoE)
-  GLM-5.1-4layer / -20layer   other GLM-5.1 prunes
+  GLM-5.2          full 744B model (zai-org/GLM-5.2)
+  GLM-5.2_5layer   5-layer GLM-5.2 prune (Pinaster/GLM-5.2_5layer; 3 dense + 2 MoE)
 
 Usage (run ON the devbox; miles editable-installed under /personal):
-  python scripts/run_glm5_lora.py prepare    --model-name GLM-5.1-6layer   # download model + task dataset (default gsm8k)
-  # default (megatron-bridge / unfused) backend:
-  python scripts/run_glm5_lora.py full-train --model-name GLM-5.1-6layer --num-gpus-per-node 4
-  # fused slime backend (GLM-5.2 shown; works for GLM-5.1 too):
-  python scripts/run_glm5_lora.py full-train --model-name GLM-5.2_5layer \\
-      --dsa-attention-backend slime --num-gpus-per-node 4
+  python scripts/run_glm5_2_744b_a40b_lora.py prepare    --model-name GLM-5.2_5layer   # download model + task dataset (default gsm8k)
+  # default (slime / fused TileLang) backend:
+  python scripts/run_glm5_2_744b_a40b_lora.py full-train --model-name GLM-5.2_5layer --num-gpus-per-node 4
+  # unfused megatron-bridge backend:
+  python scripts/run_glm5_2_744b_a40b_lora.py full-train --model-name GLM-5.2_5layer \\
+      --dsa-attention-backend megatron-bridge --num-gpus-per-node 4
   # DAPO-Math example (zhuzilin/dapo-math-17k, long-CoT competition math -- use a longer response len):
-  python scripts/run_glm5_lora.py prepare --model-name GLM-5.2_5layer --task dapo-math
-  python scripts/run_glm5_lora.py train   --model-name GLM-5.2_5layer --task dapo-math \\
+  python scripts/run_glm5_2_744b_a40b_lora.py prepare --model-name GLM-5.2_5layer --task dapo-math
+  python scripts/run_glm5_2_744b_a40b_lora.py train   --model-name GLM-5.2_5layer --task dapo-math \\
       --rollout-max-response-len 4096 --num-gpus-per-node 4   # add --dapo-dynamic-sampling on a real model
 
-GLM-5.2 rollout caveat: sglang does not yet serve the GLM-5.2 cross-layer (subset-indexer)
-checkpoint, so a full rollout->train loop is blocked on the rollout side. The *training* side
-is validated train-only by replaying a dumped rollout (both toys share the GLM tokenizer/vocab):
-  # 1) dump a rollout from GLM-5.1 (sglang serves 5.1 fine)
-  python scripts/run_glm5_lora.py full-train --model-name GLM-5.1-6layer \\
+GLM-5.2 rollout notes: the rollout is served by sglang with the full GLM-5.2 recipe (nsa/DSA
+attention backend + dp-attention + flashmla decode; see the sglang_args block below plus the
+INDEXER_ROPE_NEOX_STYLE=0 / SGLANG_NSA_FORCE_MLA=1 env vars). If the rollout side is ever
+unavailable (e.g. an sglang build that cannot serve the GLM-5.2 cross-layer subset-indexer
+checkpoint), the *training* side can still be validated train-only by replaying a dumped
+rollout (the GLM-5.1 and GLM-5.2 toys share the GLM tokenizer/vocab):
+  # 1) dump a rollout from GLM-5.1 (sglang serves 5.1 fine; see the GLM-5.1 sibling script)
+  python scripts/run_glm5_1_744b_a40b_lora.py full-train --model-name GLM-5.1-6layer \\
       --extra-args "--dump-details /personal/dump51"
   # 2) train GLM-5.2 on that dump (no sglang)
-  python scripts/run_glm5_lora.py train --model-name GLM-5.2_5layer \\
+  python scripts/run_glm5_2_744b_a40b_lora.py train --model-name GLM-5.2_5layer \\
       --extra-args "--load-debug-rollout-data /personal/dump51/rollout_data/0.pt"
 """
 
@@ -79,22 +89,17 @@ import miles.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
-# HF repos to download from (full models from zai-org; pruned toys from jybsuper / Pinaster).
-# Variants absent here (e.g. -4layer/-20layer) are assumed already present at --hf-checkpoint.
+# HF repos to download from (full model from zai-org; pruned toy from Pinaster).
 _HF_REPO = {
-    "GLM-5.1": "zai-org/GLM-5.1",
-    "GLM-5.1-6layer": "jybsuper/GLM-5.1-6layer",
     "GLM-5.2": "zai-org/GLM-5.2",
     "GLM-5.2_5layer": "Pinaster/GLM-5.2_5layer",
 }
 
+# LoRA-dedicated registries (scripts/models/<name>.sh); same MODEL_ARGS as the full-FT
+# glm5.2-744B-A40B(.sh/_5layer.sh) registries plus a documented LoRA section.
 _MEGATRON_MODEL_TYPE = {
-    "GLM-5.1": "glm5-744B-A40B",
-    "GLM-5.1-6layer": "glm5.1-744B-A40B_6layer",
-    "GLM-5.1-4layer": "glm5-744B-A40B_4layer",
-    "GLM-5.1-20layer": "glm5-744B-A40B_20layer",
-    "GLM-5.2": "glm5.2-744B-A40B",
-    "GLM-5.2_5layer": "glm5.2-744B-A40B_5layer",
+    "GLM-5.2": "glm5.2-744B-A40B_lora",
+    "GLM-5.2_5layer": "glm5.2-744B-A40B_5layer_lora",
 }
 
 # Explicit LoRA targets: standard attn + MLA + MLP/MoE, EXCLUDING the DSA indexer
@@ -106,13 +111,9 @@ _DEFAULT_TARGET_MODULES = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_pr
 class ScriptArgs(U.ExecuteTrainConfig):
     run_id: str = U.create_run_id()
     model_name: Literal[
-        "GLM-5.1",
-        "GLM-5.1-6layer",
-        "GLM-5.1-4layer",
-        "GLM-5.1-20layer",
         "GLM-5.2",
         "GLM-5.2_5layer",
-    ] = "GLM-5.1-6layer"
+    ] = "GLM-5.2_5layer"
     # Example task / dataset (math RL, --rm-type math for both):
     #   gsm8k     -> zhuzilin/gsm8k, short-answer grade-school math (~256-tok responses).
     #   dapo-math -> zhuzilin/dapo-math-17k (DAPO-Math-17k), hard long-CoT competition math.
@@ -142,7 +143,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # --use-rollout-routing-replay. The DSA indexer top-k replay (--use-rollout-indexer-replay) is
     # NOT added: it is a debug-only parity check (the slime kernel recomputes the top-k) and it
     # triggers sglang's ~78-128 GB/rank IndexerTopkCapturer host buffer that OOM'd the colocate pod.
-    # See _build_train_args r3_args for the full rationale.
+    # See _train r3_args for the full rationale.
     use_r3: bool = True
 
     # performance
@@ -186,10 +187,9 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # but csgmv has crashed the GLM-5.2 DSA MoE-LoRA rollout (gate_up slice miscount under
     # dp-attention -> "scheduler died") and is less robust; triton is the kernel the multinode .sh
     # wrappers already pin. Default it to triton HERE so every entrypoint that flows through this
-    # launcher inherits it -- a bare `python run_glm5_lora.py`, run_glm5_lora_multinode_full_model.sh,
-    # and the CI smoke tests previously fell back to csgmv (only run_glm5_lora_multinode.sh forced
-    # triton via --extra-args). Emitted as --sglang-lora-backend; override per-run with
-    # --sglang-lora-backend csgmv (or, via the .sh wrappers, SGLANG_LORA_BACKEND=...).
+    # launcher inherits it -- a bare `python run_glm5_2_744b_a40b_lora.py`, the multinode .sh
+    # wrappers, and the CI smoke tests all pick it up. Emitted as --sglang-lora-backend; override
+    # per-run with --sglang-lora-backend csgmv (or, via the .sh wrappers, SGLANG_LORA_BACKEND=...).
     sglang_lora_backend: str = "triton"
     # fp8 rollout: serve sglang from a pre-converted _fp8 ckpt (tools/convert_hf_to_fp8.py). fp8
     # halves rollout weight mem so the 744B model fits engine=8 (1 node); megatron TRAIN stays bf16
@@ -207,9 +207,9 @@ class ScriptArgs(U.ExecuteTrainConfig):
             self.hf_checkpoint = f"{self.model_dir}/{self.model_name}"
         if self.rollout_max_response_len == 0:
             # per-task default response budget (the .sh wrappers also set this; this keeps a bare
-            # `python run_glm5_lora.py --task ...` correct on its own). NB: no --seq-length /
-            # --rollout-max-context-len is set here -- the total seq window auto-derives from the
-            # model config; only the generation budget is capped:
+            # `python run_glm5_2_744b_a40b_lora.py --task ...` correct on its own). NB: no
+            # --seq-length / --rollout-max-context-len is set here -- the total seq window
+            # auto-derives from the model config; only the generation budget is capped:
             #   gsm8k     -> 512  (short-answer; seq < index_topk 2048 so the DSA indexer is DENSE)
             #   dapo-math -> 4096 (long-CoT; >2048 seq makes the GLM-5.2 DSA indexer go SPARSE)
             self.rollout_max_response_len = 4096 if self.task == "dapo-math" else 512
@@ -266,7 +266,7 @@ def _prepare_download(args: ScriptArgs):
 
 
 def _train(args: ScriptArgs):
-    print(f"[run] GLM-5 LoRA: model={args.model_name} (megatron_model_type={args.megatron_model_type}), dsa-backend={args.dsa_attention_backend}, r3={args.use_r3}, {args.num_gpus_per_node} GPUs, rollout tp={args.rollout_num_gpus_per_engine}")
+    print(f"[run] GLM-5.2 LoRA: model={args.model_name} (megatron_model_type={args.megatron_model_type}), dsa-backend={args.dsa_attention_backend}, r3={args.use_r3}, {args.num_gpus_per_node} GPUs, rollout tp={args.rollout_num_gpus_per_engine}")
     load_save_path = f"{args.save_dir}/{args.run_id}"
 
     ckpt_args = (
@@ -321,7 +321,7 @@ def _train(args: ScriptArgs):
     _moe_lora_layers = os.environ.get("MOE_LORA_LAYERS", "").strip()
     if _moe_lora_layers:
         print(
-            f"[run_glm5_lora] WARNING: MOE_LORA_LAYERS={_moe_lora_layers} is SET but the subset-rewrite "
+            f"[run_glm5_2_744b_a40b_lora] WARNING: MOE_LORA_LAYERS={_moe_lora_layers} is SET but the subset-rewrite "
             "feature is DISABLED (commented out for debugging) -> MoE-expert LoRA stays on ALL layers."
         )
     # if _keep_moe_lora and _moe_lora_layers:
@@ -346,7 +346,7 @@ def _train(args: ScriptArgs):
     #         _moe_patterns.append(f"*.layers.{_n}.*.linear_fc2")
     #     _tm = ",".join(_attn_only + _moe_patterns)
     #     print(
-    #         f"[run_glm5_lora] MOE_LORA_LAYERS={_moe_lora_layers} -> MoE-expert LoRA on layers {_layers} "
+    #         f"[run_glm5_2_744b_a40b_lora] MOE_LORA_LAYERS={_moe_lora_layers} -> MoE-expert LoRA on layers {_layers} "
     #         f"only (attention LoRA still on all layers); target-modules: {_tm}"
     #     )
     # MoE-expert LoRA needs TWO INDEPENDENT flags, each controlling its own thing -- not a symmetric
@@ -539,6 +539,11 @@ def full_train(args: ScriptArgs):
     """Download the model checkpoint + dataset, then run GRPO LoRA training."""
     _prepare_download(args)
     _train(args)
+
+
+@app.callback()
+def _callback() -> None:
+    pass
 
 
 if __name__ == "__main__":
