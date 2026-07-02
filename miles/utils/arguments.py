@@ -2226,12 +2226,13 @@ def miles_validate_args(args):
         assert args.target_modules is not None, "'--target-modules' is required when LoRA is enabled."
 
         if args.target_modules == "all-linear":
-            # "all-linear" = dense attention/MLP + MLA up/down projections. The DSA indexer
-            # (wq_b / wk / weights_proj) is deliberately EXCLUDED here: it is a no-op on the fused
-            # (slime) backend (the fused lighting_indexer emits only discrete top-k, no gradient),
-            # auto-adding it makes SGLang serving crash on DeepSeek-V4 (get_dsa_index_n_heads is
-            # DSA-only) and it is the target class that host-OOMs the indexer replay capturer. Add
-            # wq_b,wk,weights_proj explicitly via a comma-list when you actually want indexer LoRA.
+            # "all-linear" = dense attention/MLP + (on MLA models only) the MLA up/down
+            # projections. The DSA indexer (wq_b / wk / weights_proj) is deliberately EXCLUDED
+            # here: it is a no-op on the fused (glm-native) backend (the fused lighting_indexer
+            # emits only discrete top-k, no gradient), auto-adding it makes SGLang serving crash
+            # on DeepSeek-V4 (get_dsa_index_n_heads is DSA-only) and it is the target class that
+            # host-OOMs the indexer replay capturer. Add wq_b,wk,weights_proj explicitly via a
+            # comma-list when you actually want indexer LoRA.
             modules = [
                 # dense attention + MLP
                 "q_proj",
@@ -2241,12 +2242,29 @@ def miles_validate_args(args):
                 "gate_proj",
                 "up_proj",
                 "down_proj",
-                # MLA (DeepSeek / GLM MLA attention)
-                "q_a_proj",
-                "kv_a_proj_with_mqa",
-                "q_b_proj",
-                "kv_b_proj",
             ]
+            # MLA projections (DeepSeek / GLM / Kimi) are gated on the HF config: SGLang sizes
+            # the LoRA buffers per module NAME from the config (get_hidden_dim reads
+            # config.kv_lora_rank / q_lora_rank), so including them for a dense model (e.g.
+            # Qwen2) crashes the engine at init with AttributeError. kv pair needs kv_lora_rank;
+            # the q pair additionally needs a non-null q_lora_rank (some MLA models skip the q
+            # down-projection). If config.json is unreadable, keep the MLA names (previous
+            # behavior) so MLA models never silently lose targets.
+            _hf_cfg = {}
+            try:
+                with open(os.path.join(args.hf_checkpoint, "config.json")) as _f:
+                    _hf_cfg = json.load(_f)
+            except (OSError, ValueError):
+                logger.warning(
+                    "all-linear: could not read %s/config.json; assuming MLA and keeping the "
+                    "MLA projections in the LoRA target list.",
+                    args.hf_checkpoint,
+                )
+                _hf_cfg = {"kv_lora_rank": 1, "q_lora_rank": 1}
+            if _hf_cfg.get("kv_lora_rank"):
+                modules += ["kv_a_proj_with_mqa", "kv_b_proj"]
+                if _hf_cfg.get("q_lora_rank"):
+                    modules += ["q_a_proj", "q_b_proj"]
         elif "," in args.target_modules:
             modules = [m.strip() for m in args.target_modules.split(",")]
         else:
@@ -2349,7 +2367,20 @@ def miles_validate_args(args):
     )
 
     if args.ci_test and not args.debug_rollout_only and not args.debug_train_only:
+        from miles.backends.megatron_utils.lora_utils import is_lora_enabled
+
         args.check_weight_update_equal = True
+        if is_lora_enabled(args):
+            # LoRA base weights are FROZEN: the trainer's per-step re-ship covers the LoRA
+            # tensors plus 1:1-named base params, but NOT the engine-side stacked/fused params
+            # (fused_qkv_a_proj_with_mqa stacks q_a+kv_a on load) nor the DSA indexer weights.
+            # The checker's snapshot->reset->verify protocol would leave those reset (mangled)
+            # and report wall-to-wall mismatches, so exclude them from reset+compare; they keep
+            # their checkpoint values, which is exactly what a frozen base serves in production.
+            _lora_ci_skip = ["fused_qkv_a_proj_with_mqa", "indexer."]
+            args.check_weight_update_skip_list = (args.check_weight_update_skip_list or []) + [
+                m for m in _lora_ci_skip if m not in (args.check_weight_update_skip_list or [])
+            ]
 
     # always true on offload for colocate at the moment.
     if args.update_weight_transfer_mode == "p2p":
