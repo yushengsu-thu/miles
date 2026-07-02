@@ -157,6 +157,12 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # (host OOM -> RolloutManager SIGTERM); trade-off when OFF is the trainer re-ships the base
     # per swap AND the on-policy guarantee is lost.
     lora_base_cpu_backup: bool = True
+    # MoE-expert LoRA adapter layout — only takes effect when MoE-expert LoRA is active
+    # (KEEP_MOE_LORA=1 and the expert projections are in --target-modules; no-op otherwise).
+    #   True  (default): shared-outer grouped-expert layout (--experts-shared-outer-loras;
+    #          arguments.py auto-pairs the serve-side --sglang-experts-shared-outer-loras).
+    #   False: regular per-expert MoE LoRA (the launch_glm_rl_att_*_moe.sh layout).
+    experts_shared_outer_loras: bool = True
 
     # rollout
     num_rollout: int = 1
@@ -363,8 +369,10 @@ def _train(args: ScriptArgs):
     # Turn on only one and serving breaks (e.g. expert gate_up LoRA-B dim 768 vs 24576 = 32x ep ->
     # "scheduler died during init"), so both go on together here. KEEP_MOE_LORA=0 turns both off
     # (attention-only LoRA: q/k/v/o + MLA q_a/kv_a/q_b/kv_b), the previous bring-up default.
+    # (experts_shared_outer_loras=False keeps the per-expert layout instead; virtual-experts
+    # serving stays on either way.)
     lora_args = f'--lora-rank {args.lora_rank} --lora-alpha {args.lora_alpha} --lora-dropout {args.lora_dropout} --target-modules "{_tm}" '
-    if _keep_moe_lora:
+    if _keep_moe_lora and args.experts_shared_outer_loras:
         lora_args += "--experts-shared-outer-loras "
     if _is_full:
         # NOTE: when KEEP_MOE_LORA=1 (default) both MoE-expert-LoRA flags are on -- lora_args got the
