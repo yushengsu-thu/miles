@@ -148,6 +148,15 @@ class ScriptArgs(U.ExecuteTrainConfig):
     lora_alpha: int = 32
     lora_dropout: float = 0.0
     target_modules: str = _DEFAULT_TARGET_MODULES
+    # REQUIRED for true on-policy under colocate: without the sglang host-RAM base-weight mirror
+    # (enable_weights_cpu_backup) the base mis-maps across the torch_memory_saver pause/resume and
+    # the rollout serves a corrupted base+LoRA -> train<->rollout abs_diff ~1.46 / KL ~1.0 instead
+    # of ~0.01 / ~1e-4 (measured on GLM-5.2_5layer; exp_weight harness A/B). Default ON. Opt out
+    # (--no-lora-base-cpu-backup) ONLY for full-744B on the slime train backend when host RAM is
+    # tight: the ~372 GB/node mirror + slime init can push the pod past its cgroup memory.max
+    # (host OOM -> RolloutManager SIGTERM); trade-off when OFF is the trainer re-ships the base
+    # per swap AND the on-policy guarantee is lost.
+    lora_base_cpu_backup: bool = True
 
     # rollout
     num_rollout: int = 1
@@ -361,15 +370,12 @@ def _train(args: ScriptArgs):
         # NOTE: when KEEP_MOE_LORA=1 (default) both MoE-expert-LoRA flags are on -- lora_args got the
         # train-side --experts-shared-outer-loras above and sglang_args gets the serve-side
         # --sglang-lora-use-virtual-experts below. KEEP_MOE_LORA=0 -> attention-only, neither emitted.
-        # NOTE: --lora-base-cpu-backup is intentionally NOT added here (opt-in only). It keeps a
-        # HOST-RAM mirror of the base weights on the sglang side (enable_weights_cpu_backup) so they
-        # survive torch_memory_saver.pause() without re-ship; but at full 744B scale on the slime
-        # backend that mirror (~372 GB/node) + megatron's slime init pushed the colocate pod past
-        # its ~1.78 TB cgroup memory.max -> RolloutManager SIGTERM'd (host OOM, NOT GPU) -> sglang
-        # dp-attn all_gather peers saw "connection reset" -> cluster-wide scheduler crash. Enable it
-        # via the run_glm5_lora_multinode.sh knob LORA_BASE_CPU_BACKUP=on (passed through --extra-args)
-        # only when host RAM allows. Trade-off when OFF: skip_base_sync=False -> trainer re-ships base per swap.
         lora_args += "--no-gradient-accumulation-fusion "
+    # --lora-base-cpu-backup: default ON (see the ScriptArgs field comment — OFF silently breaks
+    # on-policy with abs_diff ~1.46 / KL ~1.0; opt out only for full-744B + slime when host RAM
+    # cannot take the ~372 GB/node mirror).
+    if args.lora_base_cpu_backup:
+        lora_args += "--lora-base-cpu-backup "
 
     # Math RL (both tasks score with the boxed/SymPy verifier --rm-type math). Shared rollout
     # args; the per-task block sets --prompt-data + --input-key. Same task-dispatch shape as
