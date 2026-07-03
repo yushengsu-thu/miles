@@ -2227,12 +2227,9 @@ def miles_validate_args(args):
 
         if args.target_modules == "all-linear":
             # "all-linear" = dense attention/MLP + (on MLA models only) the MLA up/down
-            # projections. The DSA indexer (wq_b / wk / weights_proj) is deliberately EXCLUDED
-            # here: it is a no-op on the fused (glm-native) backend (the fused lighting_indexer
-            # emits only discrete top-k, no gradient), auto-adding it makes SGLang serving crash
-            # on DeepSeek-V4 (get_dsa_index_n_heads is DSA-only) and it is the target class that
-            # host-OOMs the indexer replay capturer. Add wq_b,wk,weights_proj explicitly via a
-            # comma-list when you actually want indexer LoRA.
+            # projections. The DSA indexer (wq_b/wk/weights_proj) is deliberately excluded --
+            # no gradient on glm-native, and auto-adding it breaks SGLang serving on non-DSA
+            # models; add it explicitly via a comma-list when wanted.
             modules = [
                 # dense attention + MLP
                 "q_proj",
@@ -2243,13 +2240,10 @@ def miles_validate_args(args):
                 "up_proj",
                 "down_proj",
             ]
-            # MLA projections (DeepSeek / GLM / Kimi) are gated on the HF config: SGLang sizes
-            # the LoRA buffers per module NAME from the config (get_hidden_dim reads
-            # config.kv_lora_rank / q_lora_rank), so including them for a dense model (e.g.
-            # Qwen2) crashes the engine at init with AttributeError. kv pair needs kv_lora_rank;
-            # the q pair additionally needs a non-null q_lora_rank (some MLA models skip the q
-            # down-projection). If config.json is unreadable, keep the MLA names (previous
-            # behavior) so MLA models never silently lose targets.
+            # MLA projections are gated on the HF config: SGLang sizes LoRA buffers per module
+            # NAME (get_hidden_dim reads config.kv_lora_rank / q_lora_rank), so including them
+            # for a dense model (e.g. Qwen2) crashes the engine at init. If config.json is
+            # unreadable, keep the MLA names so MLA models never silently lose targets.
             _hf_cfg = {}
             try:
                 with open(os.path.join(args.hf_checkpoint, "config.json")) as _f:
@@ -2279,9 +2273,7 @@ def miles_validate_args(args):
             modules = [m for m in modules if m not in exclude_set]
 
         args.target_modules = modules
-        # LoRA target set changed meaningfully across versions (all-linear now also covers the MLA
-        # up/down projections). Log the resolved set so a silently-different adapter shape / trained
-        # module set on an existing recipe is visible rather than silent.
+        # Log the resolved set so a changed adapter shape on an existing recipe is visible.
         logger.info(f"LoRA target modules resolved to: {modules}")
 
         # Training and serving must agree on shared-outer grouped-expert LoRA
@@ -2371,12 +2363,9 @@ def miles_validate_args(args):
 
         args.check_weight_update_equal = True
         if is_lora_enabled(args):
-            # LoRA base weights are FROZEN: the trainer's per-step re-ship covers the LoRA
-            # tensors plus 1:1-named base params, but NOT the engine-side stacked/fused params
-            # (fused_qkv_a_proj_with_mqa stacks q_a+kv_a on load) nor the DSA indexer weights.
-            # The checker's snapshot->reset->verify protocol would leave those reset (mangled)
-            # and report wall-to-wall mismatches, so exclude them from reset+compare; they keep
-            # their checkpoint values, which is exactly what a frozen base serves in production.
+            # The engine-side stacked/fused params (fused_qkv_a_proj_with_mqa, DSA indexer)
+            # have no 1:1 trainer export under frozen-base LoRA, so the checker's reset+compare
+            # must skip them; they keep their checkpoint values, as a frozen base serves.
             _lora_ci_skip = ["fused_qkv_a_proj_with_mqa", "indexer."]
             args.check_weight_update_skip_list = (args.check_weight_update_skip_list or []) + [
                 m for m in _lora_ci_skip if m not in (args.check_weight_update_skip_list or [])

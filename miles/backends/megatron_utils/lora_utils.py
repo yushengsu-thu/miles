@@ -78,23 +78,15 @@ _MLA_HF_TO_MEGATRON = {
     "kv_a_proj_with_mqa": "linear_kv_down_proj",
     "q_b_proj": "linear_q_up_proj",
     "kv_b_proj": "linear_kv_up_proj",
-    # DSA indexer (GLM-5.1 / DeepSeek-V3.2): HF/SGLang leaf names wq_b/wk/weights_proj
-    # vs Megatron-Bridge names linear_wq_b/linear_wk/linear_weights_proj. Same HF<->Megatron
-    # mismatch handling as MLA above, so one --target-modules name resolves to the Megatron
-    # name for training and back to the HF name for SGLang rollout.
+    # DSA indexer (GLM-5 / DeepSeek-V3.2): HF/SGLang leaf names vs Megatron-Bridge linear_* names.
     "wq_b": "linear_wq_b",
     "wk": "linear_wk",
     "weights_proj": "linear_weights_proj",
 }
 _MEGATRON_MLA_TO_HF = {v: k for k, v in _MLA_HF_TO_MEGATRON.items()}
 
-# SGLang's get_hidden_dim (sglang lora/utils.py:176-187, sglang-miles-glm-dev branch / PR #28110) now
-# FULLY supports q_b_proj / kv_b_proj (the MLA up-projections): both return real dims and are in the
-# supported target set (lora/utils.py:353-354). So nothing is excluded -- the colocate rollout adapter
-# config declares the SAME modules Megatron trains.
-# (Previously q_b/kv_b were dropped to avoid init crashes when sglang lacked support; that is now stale
-# and was harmful -- dropping them made sglang silently SKIP the shipped q_b/kv_b adapter tensors at
-# mem_pool.py, so the trained MLA up-proj LoRA never reached the rollout once LoRA_B became nonzero.)
+# Empty: sglang supports every module we train (dropping a module here makes sglang silently
+# skip its shipped adapter tensors, so the trained LoRA never reaches the rollout).
 _SGLANG_UNSUPPORTED_HF_TARGETS = frozenset()
 
 
@@ -327,24 +319,17 @@ def create_lora_instance(args: Namespace):
         lora_A_init_method=getattr(args, "lora_A_init_method", "xavier"),
         lora_B_init_method=getattr(args, "lora_B_init_method", "zero"),
     )
-    # MoE-expert (grouped) LoRA adapter layout, keyed on --experts-shared-outer-loras:
-    #   SET   -> shared-outer LoRA (SGLang PR #21466 contract) + share_expert_adapters=True
-    #   UNSET -> regular per-expert LoRA (share_expert_adapters=False: one adapter per local expert)
-    # NOTE: this OVERRIDES the LoRA/CanonicalLoRA dataclass default (share_expert_adapters=True).
-    # Earlier miles never passed the kwarg, so a grouped-expert MoE model with expert targets and no
-    # --experts-shared-outer-loras used the shared layout; it now defaults to per-expert. That changes
-    # the trained adapter shape / optimizer-state / checkpoint compatibility, so we log it loudly below
-    # (rather than flip the layout silently). Pass --experts-shared-outer-loras to keep the shared layout.
+    # MoE-expert (grouped) LoRA adapter layout: --experts-shared-outer-loras selects the
+    # shared-outer layout, unset means per-expert. The two adapter layouts are not
+    # checkpoint-compatible, so the choice is logged loudly below.
     _shared_outer = bool(getattr(args, "experts_shared_outer_loras", False))
     lora_kwargs["share_expert_adapters"] = _shared_outer
-    # experts_shared_outer_loras is only supported by the standard ``LoRA`` class today.
+    # only supported by the standard ``LoRA`` class today
     if lora_cls is LoRA:
         lora_kwargs["experts_shared_outer_loras"] = _shared_outer
 
     lora = lora_cls(**lora_kwargs)
 
-    # Surface the MoE-expert LoRA layout whenever expert projections are targeted -- it is a
-    # behavior/checkpoint-affecting choice and used to be implicit (shared).
     _expert_leaves = ("linear_fc1", "linear_fc2", "gate_proj", "up_proj", "down_proj")
     if any(any(leaf in str(tm) for leaf in _expert_leaves) for tm in (target_modules or [])):
         logger.warning(

@@ -10,13 +10,8 @@ N_DENSE_LAYERS=3
 N_MOE_LAYERS=75
 NHEADS=64
 
-# GLM-5.2 744B-A40B with DSA cross-layer index sharing. Only the computing layers
-# (1,2,3,7,11,...,75 in Megatron 1-indexing) carry indexer weights and compute the
-# sparse top-k; the remaining layers reuse the most recent computing layer's indices.
-# The schedule (index_topk_freq=4, index_skip_topk_offset=3) is read from the HF config
-# by the shared glm5 provider; cross-layer sharing activates when index_topk_freq > 1.
-# allgather-CP is enabled at train time in the run script (not here) so that checkpoint
-# conversion does not need to parse it. Differs from glm5-744B-A40B.sh only in rotary-base.
+# GLM-5.2 744B-A40B (DSA cross-layer index sharing; the schedule is read from the HF config
+# by the shared glm5 provider). Differs from glm5-744B-A40B.sh only in rotary-base.
 MODEL_ARGS=(
    --spec "miles_plugins.models.glm5.glm5" "get_glm5_spec"
     --moe-layer-freq "[0]*${N_DENSE_LAYERS}+[1]*${N_MOE_LAYERS}"

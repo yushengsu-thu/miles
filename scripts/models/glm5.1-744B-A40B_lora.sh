@@ -10,11 +10,8 @@ N_DENSE_LAYERS=3
 N_MOE_LAYERS=75
 NHEADS=64
 
-# GLM-5.1 744B-A40B (zai-org/GLM-5.1, glm_moe_dsa). MODEL_ARGS are identical to
-# glm5-744B-A40B.sh (the full-FT GLM-5/5.1 registry): GLM-5.1 uses rotary-base 1e6;
-# the ONLY architecture difference vs the glm5.2-744B-A40B* registries is
-# --rotary-base (5.2 uses 8e6) -- the DSA cross-layer index-sharing schedule is read
-# from the HF config by the shared glm5 provider, not from these args.
+# GLM-5.1 744B-A40B (zai-org/GLM-5.1, glm_moe_dsa). Identical to glm5-744B-A40B.sh; the only
+# architecture difference vs the glm5.2-744B-A40B* registries is --rotary-base (5.2 uses 8e6).
 MODEL_ARGS=(
    --spec "miles_plugins.models.glm5.glm5" "get_glm5_spec"
     --moe-layer-freq "[0]*${N_DENSE_LAYERS}+[1]*${N_MOE_LAYERS}"

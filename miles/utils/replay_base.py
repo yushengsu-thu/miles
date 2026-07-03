@@ -194,12 +194,9 @@ class BaseReplayManager:
         if mismatch_count == 0:
             return
 
-        # Diagnostic (MILES_R3_DIAG): is a mismatch a benign near-tie (the recompute & replay pick
-        # different but ~equally-scored experts -> same MoE output -> matching logprobs) or a real
-        # divergence (replay picked genuinely lower-scored experts)? Per mismatched token, compare,
-        # under the TRAINING router's own scores: the gap between the last-selected (rank topk) and
-        # first-dropped (rank topk+1) expert (≈0 => ill-conditioned near-tie), and the mean score of
-        # the REPLAYED experts vs the recompute's own top-k (ratio≈1 => benign; <<1 => real).
+        # MILES_R3_DIAG: classify a replay/recompute mismatch as a benign near-tie (replayed
+        # experts score ~equal to the recompute's top-k under the training router) or a real
+        # divergence (replayed experts genuinely lower-scored).
         if os.environ.get("MILES_R3_DIAG"):
             sf = scores.view(-1, scores.shape[-1]).float()
             mm = is_mismatch.nonzero(as_tuple=False).squeeze(1)

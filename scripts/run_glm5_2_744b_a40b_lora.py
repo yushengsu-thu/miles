@@ -67,9 +67,8 @@ class ScriptArgs(U.ExecuteTrainConfig):
         "GLM-5.2",
         "GLM-5.2_5layer",
     ] = "GLM-5.2_5layer"
-    # gsm8k: short-answer math (~256-tok responses). dapo-math: long-CoT competition math --
-    # pass a larger --rollout-max-response-len; a >2048 total seq is also what makes the
-    # GLM-5.2 DSA indexer go genuinely SPARSE (index_topk=2048).
+    # gsm8k: short-answer math. dapo-math: long-CoT competition math (needs a larger
+    # --rollout-max-response-len; >2048 total seq also makes the DSA indexer go SPARSE).
     task: Literal["gsm8k", "dapo-math"] = "gsm8k"
 
     hf_checkpoint: str | None = None
@@ -78,13 +77,10 @@ class ScriptArgs(U.ExecuteTrainConfig):
     data_dir: str = "/root/datasets"
     megatron_path: str = "/root/Megatron-LM"
 
-    # DSA sparse-MLA kernel backend; see the module docstring. The matching --qkv-format is
-    # chosen automatically (see _get_parallel_config).
+    # DSA sparse-MLA kernel backend; the matching --qkv-format is chosen automatically.
     dsa_attention_backend: Literal["megatron-bridge-native", "glm-native"] = "glm-native"
 
-    # R3 rollout routing replay (arxiv 2510.11370): replay the rollout's recorded MoE top-8 in
-    # training. Adds ONLY --use-rollout-routing-replay; the DSA indexer replay is deliberately
-    # not added (see _train r3_args).
+    # R3 rollout routing replay (arxiv 2510.11370); adds only --use-rollout-routing-replay.
     use_r3: bool = True
 
     # performance
@@ -95,45 +91,34 @@ class ScriptArgs(U.ExecuteTrainConfig):
     lora_alpha: int = 32
     lora_dropout: float = 0.0
     target_modules: str = _DEFAULT_TARGET_MODULES
-    # REQUIRED for true on-policy under colocate: without the sglang host-RAM base-weight mirror
-    # the base mis-maps across the torch_memory_saver pause/resume and the rollout serves a
-    # corrupted base+LoRA (abs_diff ~1.46 / KL ~1.0 instead of ~0.01 / ~1e-4). Opt out
-    # (--no-lora-base-cpu-backup) only for full-744B on glm-native when host RAM cannot take the
-    # ~372 GB/node mirror.
+    # REQUIRED for true on-policy under colocate (without the host-RAM base mirror the rollout
+    # serves a corrupted base+LoRA, KL ~1.0 vs ~1e-4). Opt out only when host RAM cannot take
+    # the ~372 GB/node mirror on the full model.
     lora_base_cpu_backup: bool = True
-    # MoE-expert LoRA adapter layout (no-op unless MoE-expert LoRA is active, i.e. KEEP_MOE_LORA=1
-    # and the expert projections are in --target-modules):
-    #   True  (default): shared-outer grouped-expert layout (--experts-shared-outer-loras).
-    #   False: regular per-expert MoE LoRA.
+    # MoE-expert LoRA layout: True = shared-outer (--experts-shared-outer-loras),
+    # False = per-expert. No-op unless MoE-expert LoRA is active.
     experts_shared_outer_loras: bool = True
 
     # rollout
     num_rollout: int = 1
     rollout_batch_size: int = 4
     n_samples_per_prompt: int = 4
-    # The GLM-5.2 DSA indexer (index_topk=2048) only goes SPARSE when prompt+response > 2048;
-    # shorter sequences (the gsm8k default) run it dense.
     rollout_max_response_len: int = 0  # 0 => per-task default (gsm8k 512, dapo-math 4096)
-    # seq window: emitted as --seq-length + --rollout-max-context-len when > 0; 0 => per-task
-    # default in __post_init__.
+    # emitted as --seq-length + --rollout-max-context-len when > 0; 0 => per-task default
     seq_window: int = 0
     global_batch_size: int = 16
 
-    # DAPO dynamic sampling (dapo-math only): drop prompt-groups whose samples all get the same
-    # reward, oversampling to refill. OFF by default: a model that scores 0 on every sample
-    # (e.g. the pruned toys) would reject every batch and resample forever.
+    # DAPO dynamic sampling (dapo-math only). OFF by default: a model that scores 0 on every
+    # sample (e.g. the pruned toys) would reject every batch and resample forever.
     dapo_dynamic_sampling: bool = False
     over_sampling_batch_size: int = 32  # used only when dapo_dynamic_sampling; should exceed rollout_batch_size
 
     # rollout engine
     rollout_num_gpus_per_engine: int = 2  # rollout tp=2
     sglang_mem_fraction_static: float = 0.5
-    # sglang LoRA kernel backend. sglang's own default is csgmv, but csgmv has crashed the
-    # GLM-5.2 DSA MoE-LoRA rollout under dp-attention; triton is the robust default.
+    # sglang's own default (csgmv) has crashed the DSA MoE-LoRA rollout under dp-attention.
     sglang_lora_backend: str = "triton"
-    # fp8 rollout: serve sglang from a pre-converted _fp8 ckpt (tools/convert_hf_to_fp8.py) so
-    # the 744B model fits engine=8 (1 node); megatron TRAIN stays bf16. Point --hf-checkpoint
-    # at the _fp8 dir.
+    # serve sglang from a pre-converted _fp8 ckpt (fits engine=8 / 1 node); train stays bf16
     fp8_rollout: bool = False
 
     enable_wandb: bool = True
@@ -141,12 +126,10 @@ class ScriptArgs(U.ExecuteTrainConfig):
 
     def __post_init__(self):
         if self.hf_checkpoint is None:
-            # must be a LOCAL path -- miles asserts args.load is an existing directory
             self.hf_checkpoint = f"{self.model_dir}/{self.model_name}"
         if self.rollout_max_response_len == 0:
             self.rollout_max_response_len = 4096 if self.task == "dapo-math" else 512
         if self.seq_window == 0 and self.task == "dapo-math":
-            # bound prompt+response (and the colocate memory window); gsm8k stays unset
             self.seq_window = 8192
 
     @property
@@ -216,10 +199,8 @@ def _train(args: ScriptArgs):
             f"[run_glm5_2_744b_a40b_lora] WARNING: MOE_LORA_LAYERS={_moe_lora_layers} is SET but the subset-rewrite "
             "feature is DISABLED (commented out for debugging) -> MoE-expert LoRA stays on ALL layers."
         )
-    # MoE-expert LoRA needs both flags together: --experts-shared-outer-loras (train-side layout;
-    # arguments.py auto-pairs the serve-side --sglang-experts-shared-outer-loras) AND
-    # --sglang-lora-use-virtual-experts (serve side, emitted in sglang_args below). Only one on
-    # -> serving breaks with a LoRA-B dim mismatch at engine init.
+    # MoE-expert LoRA needs --experts-shared-outer-loras (train side) and
+    # --sglang-lora-use-virtual-experts (serve side) together; only one on -> engine-init crash.
     lora_args = f'--lora-rank {args.lora_rank} --lora-alpha {args.lora_alpha} --lora-dropout {args.lora_dropout} --target-modules "{_tm}" '
     if _keep_moe_lora and args.experts_shared_outer_loras:
         lora_args += "--experts-shared-outer-loras "
@@ -254,11 +235,9 @@ def _train(args: ScriptArgs):
 
     grpo_args = "--advantage-estimator grpo --kl-loss-coef 0.00 --kl-loss-type low_var_kl --kl-coef 0.00 --entropy-coef 0.00 --eps-clip 0.2 --eps-clip-high 0.28 "
 
-    # R3 = rollout ROUTING replay only. --use-rollout-indexer-replay is deliberately NOT added:
-    # it is a debug-only parity check (the glm-native kernel recomputes the top-k) and it makes
-    # sglang allocate a ~78-128 GB/rank host pinned buffer that OOMs the colocate pod.
-    # --use-rollout-routing-replay defaults ON, so emit it explicitly on BOTH branches to keep
-    # the use_r3 knob in full control.
+    # Routing replay only -- --use-rollout-indexer-replay is deliberately NOT added (debug-only,
+    # and its ~78-128 GB/rank host buffer OOMs the colocate pod). The flag defaults ON, so emit
+    # it explicitly on both branches.
     if args.use_r3:
         r3_args = "--use-rollout-routing-replay "
     else:
@@ -267,8 +246,7 @@ def _train(args: ScriptArgs):
     optimizer_args = (
         "--optimizer adam --lr 1e-5 --lr-decay-style constant --weight-decay 0.1 --adam-beta1 0.9 --adam-beta2 0.98 "
     )
-    # CPU Adam (the three flags must go together; matches the full-FT recipe). Under LoRA the
-    # saving is modest (only adapter params carry optimizer state); OPTIMIZER_CPU_OFFLOAD=0 to disable.
+    # CPU Adam (the three flags go together); OPTIMIZER_CPU_OFFLOAD=0 to disable.
     if os.environ.get("OPTIMIZER_CPU_OFFLOAD", "1") != "0":
         optimizer_args += "--optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d --use-precision-aware-optimizer "
 
@@ -293,8 +271,7 @@ def _train(args: ScriptArgs):
             f"--sglang-cuda-graph-max-bs {_cg} --sglang-max-running-requests 512 "
             f"--sglang-chunked-prefill-size {2048 * _eng} --sglang-watchdog-timeout 3600 "
             f"--sglang-moe-runner-backend triton --sglang-disable-shared-experts-fusion {_ve}"
-            # Without --sglang-max-lora-rank, sglang's _get_lora_n_slices miscounts the gate_up
-            # slices under dp-attention -> "scheduler died" crash at engine init.
+            # required: without it sglang miscounts the gate_up slices -> engine-init crash
             f"--sglang-max-lora-rank {args.lora_rank} "
             f"--sglang-lora-backend {args.sglang_lora_backend} "
         )
@@ -307,7 +284,6 @@ def _train(args: ScriptArgs):
 
     wandb_args = U.get_default_wandb_args(__file__, run_id=args.run_id) if args.enable_wandb else ""
 
-    # Omitted when seq_window == 0 so megatron falls back to its default 4096 train window.
     seq_args = (
         f"--seq-length {args.seq_window} --rollout-max-context-len {args.seq_window} " if args.seq_window > 0 else ""
     )
@@ -321,14 +297,13 @@ def _train(args: ScriptArgs):
         megatron_model_type=args.megatron_model_type,
         extra_env_vars={
             "MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1",
-            # GLM-5 (glm_moe_dsa) DSA indexer uses INTERLEAVED RoPE, not NeoX; sglang must match
-            # or the sparse top-k is computed on wrongly-rotated q/k -> gibberish on long
-            # sequences (short prompts < index_topk don't trigger the indexer).
+            # GLM-5 DSA indexer uses INTERLEAVED RoPE, not NeoX; a mismatch produces
+            # gibberish on long (sparse-indexed) sequences.
             "INDEXER_ROPE_NEOX_STYLE": "0",
-            # Force the NSA/DSA MLA path in sglang; needed with --sglang-attention-backend nsa.
+            # needed with --sglang-attention-backend nsa
             "SGLANG_NSA_FORCE_MLA": "1",
-            # Do NOT set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True here -- it is mutually
-            # exclusive with torch_memory_saver (colocate offload).
+            # (PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True is incompatible with
+            # torch_memory_saver / colocate offload -- do not add it.)
         },
         megatron_path=args.megatron_path,
     )
