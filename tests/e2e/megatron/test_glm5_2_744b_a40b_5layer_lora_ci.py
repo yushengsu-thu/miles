@@ -5,17 +5,11 @@ from tests.ci.ci_register import register_cuda_ci
 
 import miles.utils.external_utils.command_utils as U
 
-# Smoke test for the GLM-5.2 LoRA training script (scripts/run_glm5_2_744b_a40b_lora.py,
-# LoRA-via-Megatron-Bridge, --megatron-to-hf-mode bridge). The LoRA sibling of
-# test_glm5_2_744b_a40b_5layer_ci.py: same 5-layer toy (Pinaster/GLM-5.2_5layer, 3 dense +
-# 2 MoE), exercising the DSA cross-layer index-sharing path (computing layers 0,1,2 + skip
-# layers 3,4) through the full rollout -> train -> save-adapter loop. Two rollout steps so
-# the second step also exercises the LoRA weight update into the colocated sglang engines.
-# Unlike the full-FT sibling there is no megatron checkpoint conversion: the bridge path
-# loads the HF checkpoint directly, so prepare() only downloads model + dataset. Verifies
-# the script is functional, not model accuracy. Uses 4 of the suite's GPUs (TP=EP=4, the
-# validated single-node LoRA layout; thd + micro-batch-size 1 for the default slime DSA
-# backend).
+# Smoke test for scripts/run_glm5_2_744b_a40b_lora.py (LoRA-via-Megatron-Bridge) on the
+# 5-layer toy, exercising the DSA cross-layer index-sharing path through the full
+# rollout -> train -> save-adapter loop. Two rollout steps so the second one also exercises
+# the LoRA weight update into the colocated sglang engines. Verifies the script is
+# functional, not model accuracy. Uses 4 of the suite's GPUs (TP=EP=4).
 
 
 register_cuda_ci(est_time=1800, suite="stage-c-8-gpu-h100", labels=["model-scripts"])

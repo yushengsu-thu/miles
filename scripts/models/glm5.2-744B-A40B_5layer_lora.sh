@@ -1,12 +1,8 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/glm5.2-744B-A40B_lora.sh"
 
-# Override for 5-layer pruned model (first 5 layers: 3 dense + 2 MoE).
-# Keeps at least one computing + one skip layer so the DSA cross-layer index
-# sharing path is exercised (computing layers 0,1,2; skip layers 3,4).
-# Same override as glm5.2-744B-A40B_5layer.sh, applied on top of the LoRA
-# registry (glm5.2-744B-A40B_lora.sh) -- see the LoRA-defaults section there
-# for how the file is consumed and which flags the runner .py emits itself.
+# Override for the 5-layer pruned model (first 5 layers: 3 dense + 2 MoE). Keeps at least
+# one computing + one skip layer so the DSA cross-layer index sharing path is exercised.
 N_MOE_LAYERS=2
 
 for ((i=0; i<${#MODEL_ARGS[@]}; i++)); do

@@ -58,38 +58,11 @@ MODEL_ARGS=(
     --enable-experimental
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LoRA defaults (GLM-5.2 LoRA registry, consumed by scripts/run_glm5_2_744b_a40b_lora.py)
+# GLM-5.2 LoRA registry (consumed by scripts/run_glm5_2_744b_a40b_lora.py). MODEL_ARGS carries
+# the model ARCHITECTURE only (identical to glm5.2-744B-A40B.sh, the full-FT registry):
+# execute_train sources this file and prepends ${MODEL_ARGS[@]} BEFORE the runner-emitted args,
+# and argparse takes the last occurrence -- so every LoRA / run-mode flag lives in the runner
+# .py, not here (boolean flags set here could not be turned back off by the runner's knobs).
 #
-# How this file is consumed: miles.utils.external_utils.command_utils.execute_train()
-# does `source scripts/models/<megatron_model_type>.sh` and prepends ONLY the
-# ${MODEL_ARGS[@]} array to the train.py command line, BEFORE the args emitted by the
-# runner .py; argparse takes the LAST occurrence, so anything the runner emits always
-# wins over this file. (U.convert_checkpoint sources the same array, but the bridge-LoRA
-# runner never converts a megatron checkpoint -- it loads the HF checkpoint directly via
-# --megatron-to-hf-mode bridge.)
-#
-# Division of labor -- MODEL_ARGS above carries the model ARCHITECTURE only (identical to
-# glm5.2-744B-A40B.sh, the full-FT registry); every LoRA / run-mode flag is emitted by the
-# runner .py and is deliberately NOT duplicated here, because (a) value flags set here
-# would be silently overridden anyway (last-occurrence-wins) and (b) boolean flags set
-# here could NOT be turned back off by the runner's knobs (e.g. KEEP_MOE_LORA=0 must be
-# able to drop --experts-shared-outer-loras). For reference, the runner emits:
-#   * bridge + DSA backend:  --megatron-to-hf-mode bridge --dsa-attention-backend {glm-native|megatron-bridge-native}
-#                            (+ the matching --qkv-format thd|bshd and --micro-batch-size 1)
-#   * adapter shape:         --lora-rank 16 --lora-alpha 32 --lora-dropout 0.0
-#                            --target-modules "q,k,v,o + MLA q_a/kv_a/q_b/kv_b + gate/up/down"
-#                            (DSA indexer wq_b/wk/weights_proj excluded by default)
-#   * MoE-expert LoRA pair:  --experts-shared-outer-loras (train side) +
-#                            --sglang-lora-use-virtual-experts (serve side); both gated by
-#                            KEEP_MOE_LORA=1 (default)
-#   * LoRA misc:             --no-gradient-accumulation-fusion; sglang serving:
-#                            --sglang-max-lora-rank <rank> --sglang-lora-backend triton
-#   * opt-in via --extra-args: --lora-base-cpu-backup (host-RAM base mirror; watch pod RAM)
-#
-# NOTE on --spec (above): in the LoRA-via-bridge path (--megatron-to-hf-mode bridge +
-# --lora-rank>0) the model is built by the Megatron-Bridge provider + miles' "dsa"
-# experimental-attention-variant monkey-patch (bridge_lora_helpers.py), NOT get_glm5_spec --
-# args.spec is never imported/invoked there. It is kept for parity with the other glm5
-# registry entries (non-bridge / full-spec paths still use it).
-# ─────────────────────────────────────────────────────────────────────────────
+# NOTE on --spec (above): inert in the LoRA-via-bridge path (the model is built by the
+# Megatron-Bridge provider, not get_glm5_spec); kept for parity with the non-bridge registries.
