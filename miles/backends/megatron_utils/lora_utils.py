@@ -319,13 +319,11 @@ def create_lora_instance(args: Namespace):
         lora_A_init_method=getattr(args, "lora_A_init_method", "xavier"),
         lora_B_init_method=getattr(args, "lora_B_init_method", "zero"),
     )
-    # MoE-expert LoRA layout: per-expert by default; --experts-shared-outer-loras selects the
-    # shared-outer layout (validated and logged in arguments.py). Only the standard ``LoRA``
-    # class supports the shared-outer flag.
-    shared_outer = bool(getattr(args, "experts_shared_outer_loras", False))
-    lora_kwargs["share_expert_adapters"] = shared_outer
-    if lora_cls is LoRA:
-        lora_kwargs["experts_shared_outer_loras"] = shared_outer
+    # Opt-in to SGLang PR #21466's shared-outer grouped-expert LoRA; per-expert is the
+    # Megatron-Bridge default. Only the standard ``LoRA`` class supports the flag.
+    if getattr(args, "experts_shared_outer_loras", False):
+        assert lora_cls is LoRA, "--experts-shared-outer-loras requires the standard LoRA adapter type"
+        lora_kwargs["experts_shared_outer_loras"] = True
 
     lora = lora_cls(**lora_kwargs)
 
