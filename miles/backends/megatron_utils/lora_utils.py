@@ -259,7 +259,7 @@ def convert_target_modules_to_hf(megatron_modules: list[str]) -> list[str]:
 
 
 def target_modules_hf_for_sglang_rollout(args: Namespace) -> list[str]:
-    """HF target_modules for SGLang LoRA init/sync, with MLA q_b/kv_b dropped (unsupported)."""
+    """HF target_modules for SGLang LoRA init/sync (minus _SGLANG_UNSUPPORTED_HF_TARGETS, currently empty)."""
     raw = list(args.target_modules) if args.target_modules else []
     hf = convert_target_modules_to_hf(raw)
     out = [m for m in hf if m not in _SGLANG_UNSUPPORTED_HF_TARGETS]
@@ -319,28 +319,15 @@ def create_lora_instance(args: Namespace):
         lora_A_init_method=getattr(args, "lora_A_init_method", "xavier"),
         lora_B_init_method=getattr(args, "lora_B_init_method", "zero"),
     )
-    # MoE-expert (grouped) LoRA adapter layout: --experts-shared-outer-loras selects the
-    # shared-outer layout, unset means per-expert. The two adapter layouts are not
-    # checkpoint-compatible, so the choice is logged loudly below.
-    _shared_outer = bool(getattr(args, "experts_shared_outer_loras", False))
-    lora_kwargs["share_expert_adapters"] = _shared_outer
-    # only supported by the standard ``LoRA`` class today
+    # MoE-expert LoRA layout: per-expert by default; --experts-shared-outer-loras selects the
+    # shared-outer layout (validated and logged in arguments.py). Only the standard ``LoRA``
+    # class supports the shared-outer flag.
+    shared_outer = bool(getattr(args, "experts_shared_outer_loras", False))
+    lora_kwargs["share_expert_adapters"] = shared_outer
     if lora_cls is LoRA:
-        lora_kwargs["experts_shared_outer_loras"] = _shared_outer
+        lora_kwargs["experts_shared_outer_loras"] = shared_outer
 
     lora = lora_cls(**lora_kwargs)
-
-    _expert_leaves = ("linear_fc1", "linear_fc2", "gate_proj", "up_proj", "down_proj")
-    if any(any(leaf in str(tm) for leaf in _expert_leaves) for tm in (target_modules or [])):
-        logger.warning(
-            "MoE-expert LoRA layout: %s (share_expert_adapters=%s). "
-            "This is set from --experts-shared-outer-loras (%s); the default is per-expert, which "
-            "differs from the earlier implicit shared layout -- checkpoints across the two are not "
-            "interchangeable.",
-            "shared-outer" if _shared_outer else "per-expert",
-            _shared_outer,
-            "on" if _shared_outer else "off",
-        )
 
     logger.info(
         f"Created {lora_cls.__name__}: rank={args.lora_rank}, alpha={args.lora_alpha}, "

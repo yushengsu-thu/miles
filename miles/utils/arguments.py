@@ -2277,6 +2277,16 @@ def miles_validate_args(args):
             args.sglang_experts_shared_outer_loras
         ), "experts_shared_outer_loras and sglang_experts_shared_outer_loras must agree"
 
+        # MoE-expert LoRA adapter layout: per-expert by default; --experts-shared-outer-loras
+        # opts into the shared-outer layout. The two layouts' checkpoints are not
+        # interchangeable, so say which one this run uses.
+        _expert_leaves = ("linear_fc1", "linear_fc2", "gate_proj", "up_proj", "down_proj")
+        if any(leaf in str(tm) for tm in modules for leaf in _expert_leaves):
+            logger.warning(
+                "MoE-expert LoRA layout: %s (--experts-shared-outer-loras).",
+                "shared-outer" if args.experts_shared_outer_loras else "per-expert",
+            )
+
     assert not (args.kl_coef != 0 and args.kl_loss_coef != 0), "Only one of kl_coef and kl_loss_coef can be set"
 
     if args.advantage_estimator in ["reinforce_plus_plus", "reinforce_plus_plus_baseline"]:
