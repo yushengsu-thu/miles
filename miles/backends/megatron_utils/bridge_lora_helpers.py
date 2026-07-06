@@ -133,25 +133,4 @@ def _setup_lora_model_via_bridge(args: Namespace) -> list:
     # The "dsa" experimental-attention spec is registered by the Megatron-Bridge GLM-5 bridge
     # itself; no caller-side megatron-core monkey-patch is needed here.
     model = provider.provide_distributed_model(wrap_with_ddp=True, ddp_config=ddp_config)
-    # provide() can hand modules a config object distinct from `provider`, so the backend set
-    # above may not reach the configs the attention modules read at forward time. Force it onto
-    # every module config, and explicitly onto TileLangMLASelfAttention.config so its forward
-    # does not fall back to the unfused path on a thd input.
-    _backend = getattr(provider, "dsa_attention_backend", None)
-    if _backend is not None:
-        _n = _mla = 0
-        for _chunk in _ensure_model_list(model):
-            for _m in _chunk.modules():
-                _cfg = getattr(_m, "config", None)
-                if _cfg is not None and hasattr(_cfg, "dsa_attention_backend"):
-                    _cfg.dsa_attention_backend = _backend
-                    _n += 1
-                if _m.__class__.__name__ == "TileLangMLASelfAttention" and getattr(_m, "config", None) is not None:
-                    _mla += 1
-                    _m.config.dsa_attention_backend = _backend
-        print(
-            f"[dsa-fix:lora] backend={_backend!r}; forced on {_n} module configs; "
-            f"{_mla} TileLangMLASelfAttention modules",
-            flush=True,
-        )
     return model
