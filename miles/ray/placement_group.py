@@ -191,9 +191,6 @@ def create_rollout_manager(args, pg):
 
     if args.check_weight_update_equal:
         ray.get(rollout_manager.check_weights.remote(action="snapshot"))
-        # Honor the skip list on the reset too: params excluded from the compare (e.g. the
-        # frozen-base fused/indexer params under LoRA, see arguments.py) keep their checkpoint
-        # values instead of being left mangled for the rest of the run.
         ray.get(
             rollout_manager.check_weights.remote(action="reset_tensors", skip_list=args.check_weight_update_skip_list)
         )

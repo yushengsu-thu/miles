@@ -130,7 +130,5 @@ def _setup_lora_model_via_bridge(args: Namespace) -> list:
     if args.offload_train:
         patch_param_grad_buffer_for_colocate_mode_lora()
 
-    # The "dsa" experimental-attention spec is registered by the Megatron-Bridge GLM-5 bridge
-    # itself; no caller-side megatron-core monkey-patch is needed here.
     model = provider.provide_distributed_model(wrap_with_ddp=True, ddp_config=ddp_config)
     return model
