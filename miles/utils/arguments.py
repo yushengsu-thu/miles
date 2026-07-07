@@ -2254,8 +2254,6 @@ def miles_validate_args(args):
             modules = [m for m in modules if m not in exclude_set]
 
         args.target_modules = modules
-        # Log the resolved set so a changed adapter shape on an existing recipe is visible.
-        logger.info(f"LoRA target modules resolved to: {modules}")
 
         # Training and serving must agree on shared-outer grouped-expert LoRA
         # (expert_dim=1 buffers in SGLang).
