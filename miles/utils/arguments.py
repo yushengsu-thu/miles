@@ -1908,6 +1908,13 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
         # Required whenever expert projections are LoRA targets (engine-init LoRA-B dim
         # mismatch otherwise) and inert without MoE-expert LoRA, so defaulting it on is safe.
         parser.set_defaults(sglang_lora_use_virtual_experts=True)
+        parser.add_argument(
+            "--no-sglang-lora-use-virtual-experts",
+            dest="sglang_lora_use_virtual_experts",
+            action="store_false",
+            help="Serve MoE-expert LoRA through sglang's fused_moe_lora alignment path instead "
+            "of the virtual-experts path.",
+        )
         parser = add_session_arguments(parser)
         parser = add_network_arguments(parser)
         parser = add_reward_model_arguments(parser)
