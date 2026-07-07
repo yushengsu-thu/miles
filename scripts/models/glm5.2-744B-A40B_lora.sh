@@ -53,11 +53,6 @@ MODEL_ARGS=(
     --enable-experimental
 )
 
-# GLM-5.2 LoRA registry (consumed by scripts/run_glm5_2_744b_a40b_lora.py). MODEL_ARGS carries
-# the model ARCHITECTURE only (identical to glm5.2-744B-A40B.sh, the full-FT registry):
-# execute_train sources this file and prepends ${MODEL_ARGS[@]} BEFORE the runner-emitted args,
-# and argparse takes the last occurrence -- so every LoRA / run-mode flag lives in the runner
-# .py, not here (boolean flags set here could not be turned back off by the runner's knobs).
-#
-# NOTE on --spec (above): inert in the LoRA-via-bridge path (the model is built by the
-# Megatron-Bridge provider, not get_glm5_spec); kept for parity with the non-bridge registries.
+# LoRA registry for scripts/run_glm5_2_744b_a40b_lora.py: MODEL_ARGS carries the architecture only
+# (identical to glm5.2-744B-A40B.sh); every LoRA / run-mode flag lives in the runner, which
+# always wins (argparse last-occurrence). --spec above is inert under bridge LoRA.

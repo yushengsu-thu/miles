@@ -85,8 +85,7 @@ _MLA_HF_TO_MEGATRON = {
 }
 _MEGATRON_MLA_TO_HF = {v: k for k, v in _MLA_HF_TO_MEGATRON.items()}
 
-# Empty: sglang supports every module we train (dropping a module here makes sglang silently
-# skip its shipped adapter tensors, so the trained LoRA never reaches the rollout).
+# Empty: dropping a module here makes sglang silently skip its shipped adapter tensors.
 _SGLANG_UNSUPPORTED_HF_TARGETS = frozenset()
 
 
@@ -319,8 +318,7 @@ def create_lora_instance(args: Namespace):
         lora_A_init_method=getattr(args, "lora_A_init_method", "xavier"),
         lora_B_init_method=getattr(args, "lora_B_init_method", "zero"),
     )
-    # Opt-in to SGLang PR #21466's shared-outer grouped-expert LoRA; per-expert is the
-    # Megatron-Bridge default. Only the standard ``LoRA`` class supports the flag.
+    # shared-outer grouped-expert LoRA (SGLang PR #21466); per-expert is the default
     if getattr(args, "experts_shared_outer_loras", False):
         assert lora_cls is LoRA, "--experts-shared-outer-loras requires the standard LoRA adapter type"
         lora_kwargs["experts_shared_outer_loras"] = True

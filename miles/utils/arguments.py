@@ -1904,9 +1904,8 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
         parser = add_router_arguments(parser)
         parser = add_debug_arguments(parser)
         parser = add_sglang_arguments(parser)
-        # miles default: virtual-experts MoE-LoRA serving ON (sglang's own default is False).
-        # Required whenever expert projections are LoRA targets (engine-init LoRA-B dim
-        # mismatch otherwise) and inert without MoE-expert LoRA, so defaulting it on is safe.
+        # required whenever expert projections are LoRA targets, inert otherwise
+        # (sglang's own default is False)
         parser.set_defaults(sglang_lora_use_virtual_experts=True)
         parser.add_argument(
             "--no-sglang-lora-use-virtual-experts",
@@ -2230,10 +2229,8 @@ def miles_validate_args(args):
         assert args.target_modules is not None, "'--target-modules' is required when LoRA is enabled."
 
         if args.target_modules == "all-linear":
-            # Dense attention + MLP; MLA models (per the HF config) additionally get the MLA
-            # projections -- SGLang sizes LoRA buffers per module name, so listing them on a
-            # dense model crashes the engine at init. The DSA indexer (wq_b/wk/weights_proj)
-            # stays excluded: no gradient on the tilelang backend; list it explicitly when wanted.
+            # MLA projections are HF-config-gated (SGLang sizes LoRA buffers per module name;
+            # listing them on a dense model crashes the engine). The DSA indexer stays excluded.
             modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
             hf_config = load_hf_config(args.hf_checkpoint)
             if getattr(hf_config, "kv_lora_rank", None):
@@ -2263,9 +2260,7 @@ def miles_validate_args(args):
             args.sglang_experts_shared_outer_loras
         ), "experts_shared_outer_loras and sglang_experts_shared_outer_loras must agree"
 
-        # MoE-expert LoRA adapter layout: per-expert by default; --experts-shared-outer-loras
-        # opts into the shared-outer layout. The two layouts' checkpoints are not
-        # interchangeable, so say which one this run uses.
+        # the two MoE-expert adapter layouts are not checkpoint-compatible; say which one runs
         _expert_leaves = ("linear_fc1", "linear_fc2", "gate_proj", "up_proj", "down_proj")
         if any(leaf in str(tm) for tm in modules for leaf in _expert_leaves):
             logger.warning(

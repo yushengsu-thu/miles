@@ -4,12 +4,10 @@ from tests.ci.ci_register import register_cuda_ci
 
 import miles.utils.external_utils.command_utils as U
 
-# Smoke test for MoE-expert LoRA on gpt-oss-20b (LoRA-via-Megatron-Bridge, expert-only
-# targets gate/up/down). Mirrors examples/lora/run-gpt-oss-20B-megatron-moe-lora.sh with a
-# CI-sized rollout, and runs the MoE-expert LoRA combination matrix — {shared-outer +
-# virtual-experts} and {per-expert + no-virtual-experts} — sequentially; EVERY combination
-# must pass. Verifies the script is functional, not model accuracy. Uses 4 of the suite's
-# GPUs (TP=4, EP=1, grouped-GEMM experts).
+# MoE-expert LoRA smoke test on gpt-oss-20b (expert-only targets, bridge mode; CI-sized
+# version of examples/lora/run-gpt-oss-20B-megatron-moe-lora.sh). Runs both serving
+# combinations — {shared-outer + virtual-experts, per-expert + no-virtual-experts} — and
+# every combination must pass. Functionality, not accuracy; 4 GPUs (TP=4, EP=1).
 
 
 register_cuda_ci(est_time=5400, suite="stage-c-8-gpu-h100", labels=["model-scripts"])
@@ -124,7 +122,7 @@ if __name__ == "__main__":
         os.environ.pop(proxy_var, None)
     for name, shared_outer, virtual_experts in _CONFIGS:
         print(f"[gpt-oss-moe-lora-ci] ===== combo: {name} =====", flush=True)
-        # a fresh ray/sglang between combos; the previous combo's teardown can lag
+        # fresh ray/sglang between combos
         U.exec_command("ray stop --force || true; pkill -9 sglang || true; sleep 10")
         execute(shared_outer, virtual_experts)
         print(f"[gpt-oss-moe-lora-ci] ===== combo PASSED: {name} =====", flush=True)

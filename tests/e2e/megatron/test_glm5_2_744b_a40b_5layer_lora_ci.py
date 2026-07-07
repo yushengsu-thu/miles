@@ -5,20 +5,16 @@ from tests.ci.ci_register import register_cuda_ci
 
 import miles.utils.external_utils.command_utils as U
 
-# Smoke test for scripts/run_glm5_2_744b_a40b_lora.py (LoRA-via-Megatron-Bridge) on the
-# 5-layer toy, exercising the DSA cross-layer index-sharing path through the full
-# rollout -> train -> save-adapter loop. Runs the MoE-expert LoRA combination matrix —
-# {shared-outer + virtual-experts} and {per-expert + no virtual-experts}, each on both DSA
-# kernel backends (tilelang / megatron) — sequentially; EVERY combination must pass.
-# Verifies the script is functional, not model accuracy. Uses 4 of the suite's GPUs (TP=EP=4).
+# Smoke test for scripts/run_glm5_2_744b_a40b_lora.py on the 5-layer toy (DSA cross-layer
+# path, full rollout -> train -> save loop). Runs the MoE-expert LoRA matrix — {shared-outer +
+# virtual-experts, per-expert + no-virtual-experts} x {tilelang, megatron} — and every
+# combination must pass. Functionality, not accuracy; 4 GPUs (TP=EP=4).
 
 
 register_cuda_ci(est_time=5400, suite="stage-c-8-gpu-h100", labels=["model-scripts"])
 
-# The weight-update checker (auto-on under --ci-test) must skip the engine-side stacked
-# params that a frozen-base LoRA run cannot re-ship: sglang stacks q_a+kv_a into
-# fused_qkv_a_proj_with_mqa at load, and the DSA indexer weights likewise have no 1:1
-# trainer export. They keep their (correct) checkpoint values; everything else is verified.
+# skip the engine-side stacked params a frozen-base LoRA run cannot re-ship
+# (they keep their correct checkpoint values; everything else is verified)
 _BASE_EXTRA = (
     "--ci-test "
     "--ci-disable-logprobs-checker "
@@ -63,7 +59,7 @@ if __name__ == "__main__":
     prepare(_args(*_CONFIGS[0][1:]))
     for name, dsa, shared_outer, virtual_experts in _CONFIGS:
         print(f"[glm5.2-lora-ci] ===== combo: {name} =====", flush=True)
-        # a fresh ray/sglang between combos; the previous combo's teardown can lag
+        # fresh ray/sglang between combos
         U.exec_command("ray stop --force || true; pkill -9 sglang || true; sleep 10")
         execute(_args(dsa, shared_outer, virtual_experts))
         print(f"[glm5.2-lora-ci] ===== combo PASSED: {name} =====", flush=True)

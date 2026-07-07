@@ -12,5 +12,3 @@ for ((i=0; i<${#MODEL_ARGS[@]}; i++)); do
     esac
 done
 
-# NOTE: --spec (inherited from glm5-744B-A40B.sh) is inert in the LoRA-via-bridge path (the
-# model is built by the Megatron-Bridge provider, not get_glm5_spec).
