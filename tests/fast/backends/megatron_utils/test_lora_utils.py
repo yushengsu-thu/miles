@@ -56,6 +56,11 @@ def _make_lora_type(name: str):
 
 
 class TestConvertTargetModulesToMegatron:
+    def test_gdn_hf_names_collapse_to_fused_in_proj(self):
+        lora = _make_lora_type("LoRA")
+        result = convert_target_modules_to_megatron(["in_proj_qkvz", "in_proj_ba", "out_proj"], lora_type=lora)
+        assert result == ["in_proj", "out_proj"]
+
     # --- "all-linear" variants ------------------------------------------------
 
     @pytest.mark.parametrize("shorthand", ["all", "all-linear", "all_linear"])
@@ -142,6 +147,17 @@ class TestConvertTargetModulesToHf:
 
     def test_standard_linear_fc2(self):
         assert convert_target_modules_to_hf(["linear_fc2"]) == ["down_proj"]
+
+    def test_gdn_in_proj_expands_to_sglang_modules(self):
+        assert convert_target_modules_to_hf(["in_proj"]) == ["in_proj_qkvz", "in_proj_ba"]
+
+    def test_gdn_out_proj_passthrough(self):
+        assert convert_target_modules_to_hf(["out_proj"]) == ["out_proj"]
+
+    def test_wildcard_passthrough_reduces_to_leaf(self):
+        assert convert_target_modules_to_hf(["language_model.decoder.layers.*.self_attention.out_proj"]) == [
+            "out_proj"
+        ]
 
     def test_canonical_split_modules(self):
         result = convert_target_modules_to_hf(["linear_q", "linear_k", "linear_v"])
