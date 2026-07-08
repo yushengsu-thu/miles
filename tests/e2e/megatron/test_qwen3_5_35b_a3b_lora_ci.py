@@ -6,12 +6,10 @@ from tests.ci.ci_register import register_cuda_ci
 import miles.utils.external_utils.command_utils as U
 
 # Smoke test for scripts/run_qwen3_5_35b_a3b_lora.py on the full Qwen3.5-35B-A3B
-# (40 layers, hybrid GDN + full attention, 256-expert MoE), matching the other
-# Qwen3.5 e2e tests which also run the full checkpoint. LoRA covers attention,
-# MoE routed + shared experts, and the GDN in_proj/out_proj projections. Runs the
-# MoE-expert LoRA matrix — {shared-outer + virtual-experts, per-expert +
-# no-virtual-experts} — and every combination must pass. Functionality, not
-# accuracy; 8 GPUs (TP2 per num_query_groups=2, EP=8).
+# checkpoint, like the other Qwen3.5 e2e tests (full rollout -> train -> save loop;
+# LoRA targets include the GDN projections). Runs the MoE-expert LoRA matrix —
+# {shared-outer + virtual-experts, per-expert + no-virtual-experts} — and every
+# combination must pass. Functionality, not accuracy; 8 GPUs (TP2, EP=8).
 
 
 register_cuda_ci(est_time=3600, suite="stage-c-8-gpu-h100", labels=["model-scripts"])
