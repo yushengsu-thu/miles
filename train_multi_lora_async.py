@@ -89,6 +89,20 @@ async def main(args):
                 logger.warning(f"Generate timed out with no trainable groups; retrying reconcile/update. {e}")
                 continue
             raise
+
+        # Slot oversubscription: the selection's bind plan was decided
+        # by the controller inside generate; execute it collectively on every
+        # trainer rank before train, then commit the reservations. On failure
+        # the reservations roll back and no slot changed tenants durably.
+        control_metadata = rollout_data.get("control_metadata") or {}
+        if bind_plan := control_metadata.get("batch_plan"):
+            txn_id = control_metadata["train_txn_id"]
+            try:
+                await actor_model.bind_adapters(bind_plan)
+                await get_multi_lora_controller().commit_bind.remote(txn_id)
+            except Exception:
+                await get_multi_lora_controller().abort_bind.remote(txn_id)
+                raise
         await actor_model.train(rollout_id, rollout_data)
         remove_rollout_data_refs(args, rollout_data)
 
