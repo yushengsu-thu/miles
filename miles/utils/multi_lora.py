@@ -13,12 +13,13 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "EmptyBatchTimeoutError",
     "RID_SEPARATOR",
+    "cache_extra_key",
     "define_new_adapter_metrics",
     "is_multi_lora_enabled",
     "make_rid",
-    "min_groups_per_dp_split",
     "parse_adapter",
-    "slot_lora_name",
+    "rid_prefix",
+    "serving_lora_name",
     "validate_multi_lora_args",
 ]
 
@@ -70,11 +71,13 @@ def validate_multi_lora_args(args: Any) -> None:
     if not args.multi_lora:
         return
 
-    # Swap in the multi-LoRA rollout fn and data source unless the user pointed these flags elsewhere.
+    # Swap in the Option 1 wrapper and its no-op manager-level data source unless
+    # the user pointed these flags elsewhere. The wrapper owns one real data
+    # source per adapter registration; the manager-level source is a facade.
     if args.rollout_function_path is None:
-        args.rollout_function_path = "miles.rollout.multi_lora.async_rollout.generate_rollout_multi_lora"
+        args.rollout_function_path = "miles.rollout.multi_lora.rollout_fn.MultiLoRARolloutFn"
     if args.data_source_path == "miles.rollout.data_source.RolloutDataSourceWithBuffer":
-        args.data_source_path = "miles.rollout.multi_lora.data_source.MultiLoRAAsyncDataSource"
+        args.data_source_path = "miles.rollout.multi_lora.data_source.MultiLoRANullDataSource"
     # The per-adapter data source is inherently global (the controller owns
     # what is sampleable); rollout workers must not shard it.
     args.rollout_global_dataset = True
@@ -180,35 +183,34 @@ def validate_multi_lora_args(args: Any) -> None:
     args.megatron_to_hf_mode = "bridge"
 
 
-def make_rid(adapter_name: str) -> str:
-    return f"{adapter_name}{RID_SEPARATOR}{uuid.uuid4().hex}"
+def make_rid(adapter_name: str, registration_id: str) -> str:
+    """Request id carrying the full registration: a stale tenant's prefix abort
+    can never match a same-name successor's requests."""
+    return f"{adapter_name}{RID_SEPARATOR}{registration_id}{RID_SEPARATOR}{uuid.uuid4().hex}"
+
+
+def rid_prefix(adapter_name: str, registration_id: str) -> str:
+    """Abort-by-prefix namespace for one registration of one adapter."""
+    return f"{adapter_name}{RID_SEPARATOR}{registration_id}{RID_SEPARATOR}"
 
 
 def parse_adapter(rid: str) -> str:
-    return rid.rsplit(RID_SEPARATOR, 1)[0]
+    # The separator cannot appear in adapter names, so the first segment is the name.
+    return rid.split(RID_SEPARATOR, 1)[0]
 
 
-def slot_lora_name(slot: int) -> str:
-    """Engine-side LoRA adapter name for a controller slot. Weight pushes and
-    every inference request (rollout and prefill scoring) must agree on this."""
-    return f"__miles_slot_{slot}"
+def serving_lora_name(adapter_name: str, registration_id: str) -> str:
+    """Engine-side LoRA adapter name for one registration. Weight pushes and every
+    inference request (rollout and prefill scoring) must agree on this. The full
+    registration id is part of the identity: a re-registered name is a new tenant,
+    a new engine lora_id, and a new KV-cache namespace (anti-ABA). Never parsed
+    back — the engine registry keys on the full string."""
+    return f"__miles_adapter_{adapter_name}_{registration_id}"
 
 
-def min_groups_per_dp_split(n_samples_per_prompt: int, dp_size: int) -> int:
-    """Minimum prompt-group count that splits cleanly across data-parallel
-    ranks.
+def cache_extra_key(adapter_name: str, registration_id: str, serving_version: int) -> str:
+    """KV-cache namespace: registration and serving version both enter the key, so
+    neither a re-registered name nor a republished revision can reuse stale KV."""
+    return f"{adapter_name}:{registration_id}:v{serving_version}"
 
-    Train batches only pop groups in multiples of this value, so each popped
-    slice has a sample count divisible by ``dp_size`` with no trimming.
 
-    Requires ``n_samples_per_prompt`` and ``dp_size`` to divide each other
-    (one must be a multiple of the other).
-    """
-    larger = max(dp_size, n_samples_per_prompt)
-    smaller = min(dp_size, n_samples_per_prompt)
-    if larger % smaller == 0:
-        return larger // n_samples_per_prompt
-    raise ValueError(
-        f"n_samples_per_prompt={n_samples_per_prompt} must be a divisor or a multiple of "
-        f"the data-parallel size {dp_size} so whole prompt groups can split evenly across ranks"
-    )
