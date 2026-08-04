@@ -9,14 +9,11 @@ logger = logging.getLogger(__name__)
 def postprocess_rollout_data(args, data, train_parallel_config):
     metadata = {}
 
-    # Multi-LoRA: record group boundaries (heterogeneous per-adapter group sizes)
-    # and lift the collection loop's batch-level step decision out of sample metadata,
-    # both before flattening.
+    # Multi-LoRA: record group boundaries (heterogeneous per-adapter group
+    # sizes) before flattening. Step decisions arrive via the typed BatchPlan
+    # (RolloutFnTrainOutput.metadata), never through sample metadata.
     if is_multi_lora_enabled(args) and isinstance(data[0], list):
         metadata["prompt_group_sizes"] = [_nested_sample_count(group) for group in data]
-        head = _first_sample(data[0])
-        metadata["step_slots"] = list(head.metadata.pop("step_slots", []))
-        metadata["step_adapter_names"] = list(head.metadata.pop("step_adapter_names", []))
 
     # flatten the data if it is a list of lists
     while isinstance(data[0], list):
@@ -64,13 +61,14 @@ def _compute_dynamic_global_batch_size(args, train_parallel_config, num_samples:
     original_gbs = args.global_batch_size
 
     if is_multi_lora_enabled(args):
-        # Batches take groups in multiples of each adapter's
-        # min_groups_per_dp_split, so this holds by construction; a violation
-        # means a generate fn's group shape broke the invariant.
+        # Masked DP padding for arbitrary counts is a tracked follow-up;
+        # until it lands, the selected whole batches must sum
+        # to a dp-divisible count (standard children with configured batch
+        # sizes satisfy this by construction).
         if num_samples % dp_size != 0:
             raise ValueError(
                 f"Multi-LoRA batch of {num_samples} samples is not divisible by dp_size={dp_size}; "
-                "the min_groups_per_dp_split invariant was violated (variable-size generate fn output?)"
+                "arbitrary variable-size child batches need the masked-padding follow-up"
             )
         return num_samples
 

@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from miles.rollout.base_types import RolloutFnTrainOutput
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
+from miles.utils.multi_lora import is_multi_lora_enabled
 from miles.rollout.generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
 from miles.rollout.inference_rollout.inference_rollout_common import GenerateState, generate_and_rm_group
 from miles.utils import dumper_utils
@@ -27,7 +28,27 @@ async def abort(state: GenerateState, pendings: set, rollout_id: int) -> list[li
 
     urls = await get_worker_urls(args)
     logger.info(f"Abort request for {urls}")
-    await asyncio.gather(*[post(f"{url}/abort_request", {"abort_all": True}) for url in urls])
+    if is_multi_lora_enabled(args):
+        # Never abort_all under multi-LoRA: the engines are shared by every
+        # tenant. Scope the abort to this child's own request namespace —
+        # cancelling other tenants' in-flight requests would hand them back
+        # reward-less aborted samples mid-batch (see sglang_rollout.abort for
+        # the same contract).
+        from miles.utils.multi_lora import rid_prefix
+
+        identity = getattr(args, "multi_lora_adapter_identity", None)
+        if identity is not None:
+            payloads = [{"rid": rid_prefix(*identity), "prefix": True}]
+        else:
+            from miles.rollout.multi_lora.data_source import fetch_snapshot, sampleable
+
+            payloads = [
+                {"rid": rid_prefix(name, run.registration_id), "prefix": True}
+                for name, run in sampleable(fetch_snapshot()).items()
+            ]
+    else:
+        payloads = [{"abort_all": True}]
+    await asyncio.gather(*[post(f"{url}/abort_request", payload) for url in urls for payload in payloads])
 
     # Let the agent integration tear down its in-flight trials so they stop hitting
     # SGLang, instead of running on until their own max_seq_len / timeout.
@@ -113,6 +134,18 @@ async def generate_rollout_async(
             except Exception as e:
                 logger.error(f"[rollout] Task raised exception: {e!r}", exc_info=True)
                 continue
+
+            if is_multi_lora_enabled(args):
+                # A shared-engine event (another tenant retiring, an engine
+                # restart) can abort this child's requests mid-flight; those
+                # samples never reach the reward model, so training on them
+                # would poison the batch. Drop the group and refill.
+                flat = [s for sub in group for s in sub] if isinstance(group[0], list) else group
+                if any(sample.status is Sample.Status.ABORTED for sample in flat):
+                    logger.warning(
+                        f"[rollout] dropping group of {len(flat)} samples aborted by a shared-engine event; refilling"
+                    )
+                    continue
 
             if do_print:
                 sample = group[0][0] if isinstance(group[0], list) else group[0]

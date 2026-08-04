@@ -114,6 +114,18 @@ class FullyAsyncRolloutFn:
             logger.info("Started fully-async rollout worker")
         return await self._drain(input.rollout_id)
 
+    async def aclose(self) -> None:
+        """Cancel the background producer: dispose/deregistration must not leak
+        a worker that keeps queueing generations under stale weights."""
+        if self._worker is not None:
+            self._worker.cancel()
+            try:
+                await self._worker
+            except asyncio.CancelledError:
+                pass
+            self._worker = None
+            logger.info("Stopped fully-async rollout worker")
+
     # -------------------------- producer --------------------------
 
     def _max_in_flight_groups(self) -> int:

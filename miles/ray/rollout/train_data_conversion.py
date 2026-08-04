@@ -119,18 +119,22 @@ def convert_samples_to_train_data(
 
     if any(sample.adapter is not None for sample in samples):
         assert all(sample.adapter is not None for sample in samples), "Cannot mix adapter and adapter-less samples"
-        train_data["adapter_slots"] = [sample.adapter.slot for sample in samples]
-        # Slots whose adapter batch completes with this batch: the trainer scales their
-        # accumulated gradients by 1/adapter-batch-size and advances the LR schedule.
-        step_slots = sorted(metadata.get("step_slots", []))
-        train_data["step_slots"] = step_slots
+        # The bind plan is authoritative for slot routing: under oversubscription
+        # a sample's stamped slot can be stale (its adapter was swapped) or None
+        # (unbound at generation time). The stamped slot is the legacy fallback.
+        slot_by_name = {name: slot for slot, name in (metadata.get("adapter_name_by_slot") or {}).items()}
+        train_data["adapter_slots"] = [
+            slot_by_name.get(sample.adapter.name, sample.adapter.slot) for sample in samples
+        ]
+        # Slots whose adapter batch completes with this batch: the trainer
+        # scales their accumulated gradients by 1/actual-count and advances the
+        # LR schedule. All of it comes from the BatchPlan.
+        train_data["step_slots"] = sorted(metadata.get("step_slots", []))
         train_data["step_adapter_names"] = sorted(metadata.get("step_adapter_names", []))
-        step_slot_set = set(step_slots)
-        train_data["step_adapter_batch_sizes"] = {
-            sample.adapter.slot: sample.metadata["adapter_global_batch_size"]
-            for sample in samples
-            if sample.adapter.slot in step_slot_set
-        }
+        if (actual_counts := metadata.get("step_adapter_actual_counts")) is not None:
+            train_data["step_adapter_actual_counts"] = actual_counts
+        if (name_by_slot := metadata.get("adapter_name_by_slot")) is not None:
+            train_data["adapter_name_by_slot"] = name_by_slot
 
     if (prompt_group_sizes := metadata.get("prompt_group_sizes")) is not None:
         train_data["prompt_group_sizes"] = prompt_group_sizes
@@ -252,7 +256,8 @@ def split_train_data_by_dp_raw(args, data: dict[str, Any], *, dp_size: int) -> l
             "dynamic_global_batch_size",
             "step_slots",
             "step_adapter_names",
-            "step_adapter_batch_sizes",
+            "step_adapter_actual_counts",
+            "adapter_name_by_slot",
             "prompt_group_sizes",
         ]:
             if key not in data:
