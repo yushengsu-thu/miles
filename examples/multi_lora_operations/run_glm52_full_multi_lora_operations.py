@@ -79,7 +79,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     max_tokens_per_gpu: int = 8192
     sglang_mem_fraction_static: float = 0.85
     sglang_lora_backend: str = "triton"
-    sglang_router_port: int = 30080
+    sglang_router_port: int = 18080
 
     api_port: int = 8068
     enable_wandb: bool = False

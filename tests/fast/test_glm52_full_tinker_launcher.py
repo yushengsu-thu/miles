@@ -51,6 +51,7 @@ def test_full_glm52_tinker_service_command_contract(monkeypatch) -> None:
             "--multi-lora-n-adapters",
             "--tinker-sampling-max-context",
             "--sglang-context-length",
+            "--sglang-router-port",
             "--target-modules",
             "--sglang-config",
         )
@@ -72,6 +73,7 @@ def test_full_glm52_tinker_service_command_contract(monkeypatch) -> None:
         "--multi-lora-n-adapters": "2",
         "--tinker-sampling-max-context": "8192",
         "--sglang-context-length": "8192",
+        "--sglang-router-port": "18080",
         "--target-modules": "q_proj,k_proj,v_proj,o_proj,q_a_proj,kv_a_proj_with_mqa,q_b_proj,kv_b_proj",
         "--sglang-config": args.sglang_config,
     }
