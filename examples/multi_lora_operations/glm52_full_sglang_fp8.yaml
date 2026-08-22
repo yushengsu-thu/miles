@@ -1,0 +1,8 @@
+sglang:
+  - name: default
+    model_path: /cluster-storage/models/GLM-5.2_fp8
+    update_weights: true
+    num_gpus_per_engine: 8
+    server_groups:
+      - worker_type: regular
+        num_gpus: 8
