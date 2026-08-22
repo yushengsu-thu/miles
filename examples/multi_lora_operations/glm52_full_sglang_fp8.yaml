@@ -5,4 +5,4 @@ sglang:
     num_gpus_per_engine: 8
     server_groups:
       - worker_type: regular
-        num_gpus: 8
+        num_gpus: 16

@@ -1,8 +1,9 @@
 """Serve full GLM-5.2 Multi-LoRA through the official Tinker SDK frontend.
 
-This launcher pins the first full-model API smoke to five whole 8xH200
-nodes: four BF16 trainer nodes and one disaggregated FP8 SGLang node.  The
-trainer layout is TP8 / EP32 / DP4 / PP1 / CP1 / ETP1.
+This launcher pins the first full-model API smoke to six whole 8xH200
+nodes: four BF16 trainer nodes and two disaggregated FP8 SGLang nodes.  The
+trainer layout is TP8 / EP32 / DP4 / PP1 / CP1 / ETP1.  Each rollout engine
+uses eight GPUs with SGLang DP8 / EP8.
 
 The smoke intentionally omits rollout routing replay.  It validates the
 ``tinker==0.24.1`` SFT/operation/publish/sample contract, not on-policy GLM
@@ -11,11 +12,11 @@ expert replay metadata.
 
 Args:
     --hf-checkpoint: Native 78-layer BF16 ``zai-org/GLM-5.2`` checkpoint.
-    --sglang-config: One-engine, 8-GPU FP8 rollout deployment YAML.
+    --sglang-config: Two-engine, 16-GPU FP8 rollout deployment YAML.
     --megatron-path: Megatron-LM checkout used by the Ray runtime.
     --save-dir: Per-rank operation checkpoint and adapter sidecar directory.
 
-The Ray cluster must already span all five nodes::
+The Ray cluster must already span all six nodes::
 
     MILES_SCRIPT_EXTERNAL_RAY=1 MASTER_ADDR=<ray-head-ip> python \\
       examples/multi_lora_operations/run_glm52_full_multi_lora_operations.py \\
@@ -53,7 +54,7 @@ _FULL_EXPERTS_PER_TOKEN = 8
 
 @dataclass
 class ScriptArgs(U.ExecuteTrainConfig):
-    """Checkpoint, topology, and service knobs for the five-node smoke."""
+    """Checkpoint, topology, and service knobs for the six-node smoke."""
 
     run_id: str = U.create_run_id()
 
@@ -64,7 +65,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
 
     actor_num_nodes: int = 4
     num_gpus_per_node: int = 8
-    rollout_num_gpus: int = 8
+    rollout_num_gpus: int = 16
     rollout_num_gpus_per_engine: int = 8
 
     # Storage/deployment ceiling. SDK clients use logical rank 8 or 16.
@@ -152,7 +153,9 @@ def _rollout_checkpoint(args: ScriptArgs) -> str:
         or group.get("num_gpus") != args.rollout_num_gpus
         or effective_gpus_per_engine != args.rollout_num_gpus_per_engine
     ):
-        raise ValueError(f"{config_path} must define one regular {args.rollout_num_gpus}-GPU rollout engine")
+        raise ValueError(
+            f"{config_path} must define one regular rollout server group totaling {args.rollout_num_gpus} GPUs with {args.rollout_num_gpus_per_engine} GPUs per engine"
+        )
     model_path = model.get("model_path")
     if not isinstance(model_path, str) or not model_path:
         raise ValueError(f"{config_path} must set the FP8 rollout model_path")
@@ -164,8 +167,8 @@ def _validate_topology(args: ScriptArgs) -> None:
         raise ValueError(
             f"the first full Tinker smoke is pinned to four 8xH200 trainer nodes; got {args.actor_num_nodes}x{args.num_gpus_per_node}"
         )
-    if args.rollout_num_gpus != 8 or args.rollout_num_gpus_per_engine != 8:
-        raise ValueError("the FP8 rollout plane is pinned to one 8xH200 engine")
+    if args.rollout_num_gpus != 16 or args.rollout_num_gpus_per_engine != 8:
+        raise ValueError("the FP8 rollout plane is pinned to two 8xH200 engines (16 GPUs total)")
     if args.n_adapters < 2:
         raise ValueError("the dual-client smoke requires at least two adapter slots")
     if args.lora_rank != 16:
@@ -289,16 +292,16 @@ def _validate_external_ray_nodes(nodes: list[dict]) -> None:
             h200_nodes.append(node)
     if len(gpu_nodes) != len(h200_nodes):
         raise RuntimeError("every live GPU node in the external Ray cluster must be one whole 8xH200 node")
-    if len(h200_nodes) < 5:
+    if len(h200_nodes) != 6:
         raise RuntimeError(
-            f"this launcher requires at least five live whole 8xH200 Ray nodes (40 H200 GPUs); found {len(h200_nodes)}"
+            f"this launcher requires exactly six live whole 8xH200 Ray nodes (48 H200 GPUs); found {len(h200_nodes)}"
         )
 
 
 def _require_external_ray() -> None:
     if os.environ.get("MILES_SCRIPT_EXTERNAL_RAY") != "1":
         raise RuntimeError(
-            "this five-node launcher requires an existing 40-GPU Ray cluster; set MILES_SCRIPT_EXTERNAL_RAY=1 before starting it"
+            "this six-node launcher requires an existing 48-GPU Ray cluster; set MILES_SCRIPT_EXTERNAL_RAY=1 before starting it"
         )
     _validate_external_ray_nodes(_live_ray_nodes())
 
@@ -306,7 +309,7 @@ def _require_external_ray() -> None:
 @app.command("serve-tinker")
 @U.dataclass_cli
 def serve_tinker(args: ScriptArgs) -> None:
-    """Start four BF16 trainer nodes plus one FP8 rollout node."""
+    """Start four BF16 trainer nodes plus two FP8 rollout nodes."""
 
     _require_external_ray()
     _validate_topology(args)
@@ -315,7 +318,7 @@ def serve_tinker(args: ScriptArgs) -> None:
     _validate_full_checkpoint(rollout_checkpoint, require_fp8=True)
     Path(args.save_dir).mkdir(parents=True, exist_ok=True)
     print(
-        f"[run] full GLM-5.2 Multi-LoRA Tinker service: 4x8 H200 trainer + 1x8 H200 rollout, TP8/EP32/DP4/PP1/CP1/ETP1, slots={args.n_adapters}, storage-rank={args.lora_rank}, frontend=http://127.0.0.1:{args.api_port}",
+        f"[run] full GLM-5.2 Multi-LoRA Tinker service: 4x8 H200 trainer + 2x8 H200 rollout, TP8/EP32/DP4/PP1/CP1/ETP1, rollout DP8/EP8 per engine, slots={args.n_adapters}, storage-rank={args.lora_rank}, frontend=http://127.0.0.1:{args.api_port}",
         flush=True,
     )
     U.execute_train(

@@ -39,6 +39,8 @@ def test_full_glm52_tinker_service_command_contract(monkeypatch) -> None:
             "--actor-num-gpus-per-node",
             "--rollout-num-gpus",
             "--rollout-num-gpus-per-engine",
+            "--sglang-ep-size",
+            "--sglang-dp-size",
             "--tensor-model-parallel-size",
             "--expert-model-parallel-size",
             "--pipeline-model-parallel-size",
@@ -56,8 +58,10 @@ def test_full_glm52_tinker_service_command_contract(monkeypatch) -> None:
         "--hf-checkpoint": "/cluster-storage/models/GLM-5.2",
         "--actor-num-nodes": "4",
         "--actor-num-gpus-per-node": "8",
-        "--rollout-num-gpus": "8",
+        "--rollout-num-gpus": "16",
         "--rollout-num-gpus-per-engine": "8",
+        "--sglang-ep-size": "8",
+        "--sglang-dp-size": "8",
         "--tensor-model-parallel-size": "8",
         "--expert-model-parallel-size": "32",
         "--pipeline-model-parallel-size": "1",
@@ -92,10 +96,14 @@ def test_full_glm52_tinker_service_command_contract(monkeypatch) -> None:
     (
         pytest.param({"actor_num_nodes": 3}, "four 8xH200 trainer nodes", id="trainer-nodes"),
         pytest.param({"num_gpus_per_node": 4}, "four 8xH200 trainer nodes", id="trainer-gpus"),
-        pytest.param({"rollout_num_gpus": 4}, "one 8xH200 engine", id="rollout-total"),
+        pytest.param(
+            {"rollout_num_gpus": 8},
+            r"two 8xH200 engines \(16 GPUs total\)",
+            id="rollout-total",
+        ),
         pytest.param(
             {"rollout_num_gpus_per_engine": 4},
-            "one 8xH200 engine",
+            r"two 8xH200 engines \(16 GPUs total\)",
             id="rollout-engine",
         ),
         pytest.param({"n_adapters": 1}, "at least two adapter slots", id="adapter-slots"),
@@ -110,24 +118,28 @@ def test_full_glm52_topology_validation(overrides: dict, message: str) -> None:
 
 def test_full_glm52_requires_external_ray(monkeypatch) -> None:
     monkeypatch.delenv("MILES_SCRIPT_EXTERNAL_RAY", raising=False)
-    with pytest.raises(RuntimeError, match="existing 40-GPU Ray cluster"):
+    with pytest.raises(RuntimeError, match="existing 48-GPU Ray cluster"):
         _require_external_ray()
 
     monkeypatch.setenv("MILES_SCRIPT_EXTERNAL_RAY", "1")
-    four_nodes = [{"Alive": True, "Resources": {"GPU": 8, "accelerator_type:H200": 1}} for _ in range(4)]
-    monkeypatch.setattr(launcher, "_live_ray_nodes", lambda: four_nodes)
-    with pytest.raises(RuntimeError, match="found 4"):
+    five_nodes = [{"Alive": True, "Resources": {"GPU": 8, "accelerator_type:H200": 1}} for _ in range(5)]
+    monkeypatch.setattr(launcher, "_live_ray_nodes", lambda: five_nodes)
+    with pytest.raises(RuntimeError, match="found 5"):
         _require_external_ray()
+
+    six_nodes = five_nodes + [{"Alive": True, "Resources": {"GPU": 8, "accelerator_type:H200": 1}}]
+    monkeypatch.setattr(launcher, "_live_ray_nodes", lambda: six_nodes)
+    _require_external_ray()
 
     monkeypatch.setattr(
         launcher,
         "_live_ray_nodes",
-        lambda: four_nodes + [{"Alive": True, "Resources": {"GPU": 8, "accelerator_type:H200": 1}}],
+        lambda: six_nodes + [{"Alive": True, "Resources": {"GPU": 8, "accelerator_type:H200": 1}}],
     )
-    _require_external_ray()
+    with pytest.raises(RuntimeError, match="found 7"):
+        _require_external_ray()
 
-    mixed_nodes = four_nodes + [
-        {"Alive": True, "Resources": {"GPU": 8, "accelerator_type:H200": 1}},
+    mixed_nodes = five_nodes + [
         {"Alive": True, "Resources": {"GPU": 8, "accelerator_type:A100": 1}},
     ]
     monkeypatch.setattr(launcher, "_live_ray_nodes", lambda: mixed_nodes)
@@ -135,7 +147,7 @@ def test_full_glm52_requires_external_ray(monkeypatch) -> None:
         _require_external_ray()
 
 
-def test_full_glm52_rollout_config_rejects_split_engines(tmp_path) -> None:
+def test_full_glm52_rollout_config_rejects_four_gpu_engines(tmp_path) -> None:
     args = ScriptArgs()
     with open(args.sglang_config) as config_file:
         config = yaml.safe_load(config_file)
@@ -143,7 +155,25 @@ def test_full_glm52_rollout_config_rejects_split_engines(tmp_path) -> None:
     config_path = tmp_path / "split-engines.yaml"
     config_path.write_text(yaml.safe_dump(config))
 
-    with pytest.raises(ValueError, match="one regular 8-GPU rollout engine"):
+    with pytest.raises(
+        ValueError,
+        match="one regular rollout server group totaling 16 GPUs with 8 GPUs per engine",
+    ):
+        _rollout_checkpoint(ScriptArgs(sglang_config=str(config_path)))
+
+
+def test_full_glm52_rollout_config_rejects_one_engine_total(tmp_path) -> None:
+    args = ScriptArgs()
+    with open(args.sglang_config) as config_file:
+        config = yaml.safe_load(config_file)
+    config["sglang"][0]["server_groups"][0]["num_gpus"] = 8
+    config_path = tmp_path / "one-engine.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+
+    with pytest.raises(
+        ValueError,
+        match="one regular rollout server group totaling 16 GPUs with 8 GPUs per engine",
+    ):
         _rollout_checkpoint(ScriptArgs(sglang_config=str(config_path)))
 
 
