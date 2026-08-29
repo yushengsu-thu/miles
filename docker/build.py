@@ -104,6 +104,7 @@ def build_and_push(
     push: bool = False,
     custom_tag: str = "",
     extra_build_args: list[str] | None = None,
+    no_cache: bool = False,
 ) -> None:
     extra_build_args = extra_build_args or []
     config = VARIANTS[variant]
@@ -139,6 +140,9 @@ def build_and_push(
 
     if push:
         cmd += ["--push"]
+
+    if no_cache:
+        cmd += ["--no-cache"]
 
     # Proxy args (pass through if set in environment, check both cases)
     for arg_name in ["HTTP_PROXY", "HTTPS_PROXY"]:
@@ -195,6 +199,7 @@ def main(
     push: bool = typer.Option(False, help="Push images to registry after building."),  # noqa: B008
     custom_tag: str = typer.Option("", help="Custom tag name (required when --image-tag is custom)."),  # noqa: B008
     build_arg: list[str] = typer.Option([], help="Extra KEY=VALUE build-arg (repeatable)."),  # noqa: B008
+    no_cache: bool = typer.Option(False, help="Disable Docker build cache."),  # noqa: B008
 ) -> None:
     build_and_push(
         variant.value,
@@ -204,6 +209,7 @@ def main(
         push=push,
         custom_tag=custom_tag,
         extra_build_args=build_arg,
+        no_cache=no_cache,
     )
 
 

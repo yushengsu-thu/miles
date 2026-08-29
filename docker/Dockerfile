@@ -24,6 +24,10 @@ ARG MEGATRON_BRANCH=miles-main
 # Empty means the branch HEAD at build time; release builds set it to freeze one commit.
 ARG MEGATRON_COMMIT=""
 
+ARG MEGATRON_BRIDGE_REPO=radixark/Megatron-Bridge
+ARG MEGATRON_BRIDGE_BRANCH=bridge
+ARG MEGATRON_BRIDGE_COMMIT=bb61fcd0b61f8acd0ef0f8b38b2240968c94c37b
+
 ARG ENABLE_CUDA_13=1
 
 ARG WHEELS_REPO=yueming-yuan/miles-wheels
@@ -165,10 +169,11 @@ RUN pip install "git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.3
 RUN TMS_CUDA_MAJOR=$(python3 -c "import torch; print(torch.version.cuda.split('.')[0])") \
     pip install git+https://github.com/fzyzcjy/torch_memory_saver.git@f05a8754daf68238d54e4cf31cb3ba866684bbaf --no-cache-dir --force-reinstall
 RUN pip install "nvidia-modelopt[torch]>=0.37.0" --no-build-isolation
-# radixark/Megatron-Bridge#24 (TE 2.17 grouped-linear contract), merged to @bridge.
-# Pinned by SHA, not branch: buildkit caches this layer on the instruction text, so a
-# branch that moves leaves the old revision baked into the image with nothing to show it.
-RUN pip install git+https://github.com/radixark/Megatron-Bridge.git@7f0fb3456f8ffe47599b5fd167b454605d85f932 --no-deps --no-build-isolation
+# Multi-LoRA requires this exact commit from radixark/Megatron-Bridge's bridge branch.
+RUN test "${MEGATRON_BRIDGE_REPO}" = "radixark/Megatron-Bridge" && \
+    test "${MEGATRON_BRIDGE_BRANCH}" = "bridge" && \
+    test "${MEGATRON_BRIDGE_COMMIT}" = "bb61fcd0b61f8acd0ef0f8b38b2240968c94c37b" && \
+    pip install git+https://github.com/${MEGATRON_BRIDGE_REPO}.git@${MEGATRON_BRIDGE_COMMIT} --no-deps --no-build-isolation
 RUN pip install megatron-energon --no-deps
 RUN pip install multi-storage-client --no-deps
 
@@ -201,11 +206,12 @@ RUN rm -rf /root/.cache/pip /root/flash-attention
 # the cu13 markers, and sglang's editable install makes them visible to every later pip
 # resolve, which would drag cu13 packages onto a cu12 image.
 RUN cd /sgl-workspace/sglang && \
-    git fetch origin ${SGLANG_BRANCH} && \
+    test "${SGLANG_BRANCH}" = "sglang-miles" && \
+    git fetch origin ${SGLANG_BRANCH}:refs/remotes/origin/${SGLANG_BRANCH} && \
     if [ -n "${SGLANG_COMMIT}" ]; then \
       git checkout -f ${SGLANG_COMMIT}; \
     else \
-      git checkout -f FETCH_HEAD; \
+      git checkout -f refs/remotes/origin/${SGLANG_BRANCH}; \
     fi && \
     if [ "${ENABLE_CUDA_13}" != "1" ]; then \
       sed -i 's/cuda-python>=13\.0/cuda-python>=12,<13/' python/pyproject.toml && \
@@ -233,6 +239,13 @@ COPY docker/install-kube-tools.sh /tmp/install-kube-tools.sh
 RUN bash /tmp/install-kube-tools.sh "${TARGETARCH}" && rm -f /tmp/install-kube-tools.sh
 
 # ====================================== Install main package ============================================
+
+ARG MULTI_LORA_ENVIRONMENT_GATE=0
+COPY docker/verify_multi_lora_environment.py /usr/local/bin/verify-multi-lora-environment
+RUN if [ "${MULTI_LORA_ENVIRONMENT_GATE}" = "1" ]; then \
+      python3 /usr/local/bin/verify-multi-lora-environment \
+        --record /etc/miles/multi_lora_dependencies.json; \
+    fi
 
 ARG MILES_COMMIT=main
 RUN git clone https://github.com/radixark/miles.git /root/miles && \
