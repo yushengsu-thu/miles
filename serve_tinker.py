@@ -52,6 +52,8 @@ async def serve(args):
     checkpoint_root = args.tinker_checkpoint_root or (args.save and f"{args.save}/tinker")
     assert checkpoint_root, "set --tinker-checkpoint-root (or --save to derive <save>/tinker)"
     hf_config = load_hf_config(args.hf_checkpoint)
+    # VL-wrapped configs (Qwen3.5/3.6) keep the language model's sizes under text_config
+    hf_config = getattr(hf_config, "text_config", None) or hf_config
     max_tokens_per_datum = hf_config.max_position_embeddings
     if args.max_tokens_per_gpu is not None:
         # The trainer pads each packed microbatch to this multiple.

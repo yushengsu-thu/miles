@@ -917,8 +917,17 @@ class TestMultiLoRAValidation:
         # bshd interleaves samples in the sequence-major flattening the spans assume.
         args = self._parse([])
         args.qkv_format = "bshd"
+        args.micro_batch_size = 2
         with pytest.raises(AssertionError, match="qkv-format thd"):
             miles_validate_args(args)
+
+    def test_accepts_bshd_with_one_sample_per_micro_batch(self):
+        # One unpacked sequence per micro-batch keeps the single adapter span contiguous (GatedDeltaNet models).
+        args = self._parse([])
+        args.qkv_format = "bshd"
+        args.micro_batch_size = 1
+        args.use_dynamic_batch_size = False
+        miles_validate_args(args)
 
     def test_rejects_shared_outer_expert_loras(self):
         # Per-expert layout only; the flag would switch sglang to a layout training never produces.
