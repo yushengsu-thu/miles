@@ -6,6 +6,7 @@ description: "Serve concurrent LoRA fine-tuning clients on one shared base model
 > **Read the docs:** [Multi-LoRA training](https://miles.radixark.com/docs/advanced/lora#multi-lora-training).
 
 - `serve_qwen3_30b_a3b_tinker.py`: prepare Qwen3-30B-A3B and launch the gateway.
+- `serve_qwen3_5_35b_a3b_tinker.py`: the same gateway on Qwen3.5-35B-A3B / Qwen3.6-35B-A3B (hybrid GDN + MoE): bshd static micro-batches, per-expert adapters, LoRA on attention, GDN in/out projections, routed and shared experts, output layer; off the MTP block.
 - `run_multi_tenant_example.py`: check marker memorization for one client or adapter isolation across concurrent tenants.
 
 ## Layout

@@ -47,6 +47,8 @@ def configure_tinker_args(args):
 
 
 def _resolve_target_modules(hf_config, *, train_attn, train_mlp, train_unembed):
+    if hf_config.model_type in ("qwen3_5", "qwen3_5_moe"):
+        return _resolve_qwen3_5_target_modules(train_attn=train_attn, train_mlp=train_mlp, train_unembed=train_unembed)
     # Other architectures need their own complete attention/MLP mapping.
     assert hf_config.model_type in (
         "qwen3",
@@ -59,5 +61,35 @@ def _resolve_target_modules(hf_config, *, train_attn, train_mlp, train_unembed):
         modules.extend(("gate_proj", "up_proj", "down_proj"))
     if train_unembed:
         modules.append("lm_head")
+    assert modules, "Tinker requires at least one trainable LoRA module group"
+    return modules
+
+
+# Qwen3.5 / 3.6 (hybrid GDN + MoE behind a VL wrapper, plus an MTP block): Megatron-anchored patterns like
+# scripts/run_qwen3_5_35b_a3b_lora.py, so adapters stay off the MTP block (no adapter export mapping) and the
+# vision tower; the pattern leaves map to the HF names SGLang serves (in_proj -> in_proj_qkvz + in_proj_ba).
+_QWEN3_5_LAYERS = "language_model.decoder.layers.*"
+
+
+def _resolve_qwen3_5_target_modules(*, train_attn, train_mlp, train_unembed):
+    modules = []
+    if train_attn:  # full-attention layers and the GDN layers' fused in_proj / out_proj
+        modules.extend(
+            f"{_QWEN3_5_LAYERS}.self_attention.{leaf}" for leaf in ("linear_qkv", "linear_proj", "in_proj", "out_proj")
+        )
+    if train_mlp:  # routed experts, the shared expert, and the dense MLP of the dense Qwen3.5 sizes
+        modules.extend(
+            f"{_QWEN3_5_LAYERS}.mlp.{leaf}"
+            for leaf in (
+                "experts.linear_fc1",
+                "experts.linear_fc2",
+                "shared_experts.linear_fc1",
+                "shared_experts.linear_fc2",
+                "linear_fc1",
+                "linear_fc2",
+            )
+        )
+    if train_unembed:
+        modules.append("language_model.output_layer")
     assert modules, "Tinker requires at least one trainable LoRA module group"
     return modules
