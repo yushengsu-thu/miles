@@ -61,10 +61,18 @@ def validate_multi_lora_args(args: Any) -> None:
         "Multi-LoRA requires --pipeline-model-parallel-size 1: a pipelined schedule would "
         "recompute activations against a later micro-batch's adapter routing."
     )
-    # Per-slot token spans assume sequence-major contiguous sample packing, which only 'thd' provides.
-    assert getattr(args, "qkv_format", "thd") == "thd", (
-        "Multi-LoRA requires --qkv-format thd: per-adapter token spans assume the "
-        f"micro-batch packs samples contiguously, which bshd does not (got {args.qkv_format!r})."
+    # Per-slot token spans assume sequence-major contiguous sample packing, which 'thd' provides; 'bshd' interleaves
+    # samples in the flattened [s, b] layout, so it is only allowed with one sample per micro-batch (needed by
+    # GatedDeltaNet models such as Qwen3.5/3.6, whose megatron-core forward rejects packed sequences).
+    qkv_format = getattr(args, "qkv_format", "thd")
+    single_sample_bshd = (
+        qkv_format == "bshd"
+        and getattr(args, "micro_batch_size", None) == 1
+        and not getattr(args, "use_dynamic_batch_size", False)
+    )
+    assert qkv_format == "thd" or single_sample_bshd, (
+        "Multi-LoRA requires --qkv-format thd, or --qkv-format bshd with --micro-batch-size 1 and no "
+        f"--use-dynamic-batch-size: per-adapter token spans assume contiguous samples (got {qkv_format!r})."
     )
     assert not getattr(args, "experts_shared_outer_loras", False), (
         "Multi-LoRA does not support --experts-shared-outer-loras; MoE expert adapters "

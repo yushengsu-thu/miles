@@ -3,7 +3,7 @@
 > **Read the docs:** [Multi-LoRA training](https://miles.radixark.com/docs/advanced/lora#multi-lora-training).
 
 - `serve_qwen3_30b_a3b_tinker.py`: prepare Qwen3-30B-A3B and launch the gateway.
-- `serve_qwen3_5_35b_a3b_tinker.py`: the same gateway on Qwen3.5-35B-A3B / Qwen3.6-35B-A3B (hybrid GDN + MoE): bshd static micro-batches, per-expert adapters, LoRA on attention, GDN in/out projections, routed and shared experts, output layer; off the MTP block.
+- `serve_tinker_gateway.py`: the same gateway with `--model` selecting the base model (`qwen3_30b_a3b`, `qwen3_5_35b_a3b`, `qwen3_6_35b_a3b`). Qwen3.5/3.6 (hybrid GDN + MoE) run one unpacked sequence per micro-batch (`--qkv-format bshd --micro-batch-size 1`), per-expert adapters, LoRA on attention, GDN in/out projections, routed and shared experts and the output layer, off the MTP block.
 - `run_multi_tenant_example.py`: check marker memorization for one client or adapter isolation across concurrent tenants.
 
 ## Layout

@@ -1,6 +1,7 @@
-"""Prepare Qwen3.5-35B-A3B and serve the Tinker gateway on separate training and sampling GPUs (hybrid GDN + MoE: bshd static micro-batches, per-expert adapters, LoRA off the MTP block)."""
+"""Serve the multi-LoRA Tinker gateway for one of the supported base models; ``--model`` picks the recipe (checkpoint, Megatron model definition, parallelism, batching mode)."""
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 import typer
 
@@ -9,12 +10,28 @@ import miles.utils.external_utils.command_utils as U
 app = typer.Typer()
 
 
+@dataclass(frozen=True)
+class _Recipe:
+    hf_name: str  # <model_dir>/<hf_name>, downloaded from Qwen/<hf_name>
+    model_type: str  # scripts/models/<model_type>.py
+    tp: int
+    ep: int
+    bshd: bool  # GatedDeltaNet models: one unpacked sequence per micro-batch (megatron-core rejects packed thd there)
+
+
+RECIPES = {
+    "qwen3_30b_a3b": _Recipe("Qwen3-30B-A3B", "qwen3-30B-A3B", tp=2, ep=4, bshd=False),
+    "qwen3_5_35b_a3b": _Recipe("Qwen3.5-35B-A3B", "qwen3.5-35B-A3B_lora", tp=2, ep=4, bshd=True),
+    "qwen3_6_35b_a3b": _Recipe("Qwen3.6-35B-A3B", "qwen3.6-35B-A3B_lora", tp=2, ep=4, bshd=True),
+}
+
+
 @dataclass
 class ScriptArgs(U.ExecuteTrainConfig):
     run_id: str = field(default_factory=U.create_run_id)
 
+    model: Literal["qwen3_30b_a3b", "qwen3_5_35b_a3b", "qwen3_6_35b_a3b"] = "qwen3_5_35b_a3b"
     hf_checkpoint: str | None = None
-    model_name: str = "Qwen3.5-35B-A3B"  # or Qwen3.6-35B-A3B: same architecture and HF classes
     model_dir: str = "/root/models"
     save_dir: str | None = None
     megatron_path: str = "/root/Megatron-LM"
@@ -22,20 +39,17 @@ class ScriptArgs(U.ExecuteTrainConfig):
     num_gpus_per_node: int = 8
     actor_num_gpus: int = 4
     rollout_num_gpus: int = 4
-    tp: int = 2  # num_query_groups=2 caps tensor parallelism for the 35B-A3B geometry
-    ep: int = 4
 
     # LoRA slot pool; per-client rank comes from the SDK, capped by lora_rank.
     lora_rank: int = 32
     lora_alpha: int = 64
-    n_adapters: int = 4  # per-expert adapters: at most 1023 // (256 // ep) slots fit one grouped GEMM
+    n_adapters: int = 4  # MoE per-expert adapters: at most 1023 // (experts // ep) slots fit one grouped GEMM
     tinker_train_attn: bool = True
     tinker_train_mlp: bool = True
     tinker_train_unembed: bool = True
 
     tinker_port: int = 10613
-    tinker_base_model: str = "Qwen/Qwen3.5-35B-A3B"
-    max_tokens_per_gpu: int = 32768  # also the gateway's per-datum cap (one sequence per micro-batch under bshd)
+    max_tokens_per_gpu: int = 32768  # trainer micro-batch budget and the gateway's per-datum cap
     rollout_num_gpus_per_engine: int = 2
     sglang_mem_fraction_static: float = 0.7
 
@@ -45,11 +59,11 @@ class ScriptArgs(U.ExecuteTrainConfig):
         if self.save_dir is None:
             self.save_dir = f"{self.output_dir}/checkpoints"
         if self.hf_checkpoint is None:
-            self.hf_checkpoint = f"{self.model_dir}/{self.model_name}"
+            self.hf_checkpoint = f"{self.model_dir}/{self.recipe.hf_name}"
 
     @property
-    def model_type(self) -> str:
-        return {"Qwen3.5-35B-A3B": "qwen3.5-35B-A3B_lora", "Qwen3.6-35B-A3B": "qwen3.6-35B-A3B_lora"}[self.model_name]
+    def recipe(self) -> _Recipe:
+        return RECIPES[self.model]
 
 
 @app.command()
@@ -57,15 +71,16 @@ class ScriptArgs(U.ExecuteTrainConfig):
 def prepare(args: ScriptArgs):
     """Download the checkpoint. Run once per node before serving."""
     U.exec_command_cpu(f"mkdir -p {args.model_dir}")
-    U.exec_command_cpu(f"hf download Qwen/{args.model_name} --local-dir {args.model_dir}/{args.model_name}")
+    U.exec_command_cpu(f"hf download Qwen/{args.recipe.hf_name} --local-dir {args.model_dir}/{args.recipe.hf_name}")
 
 
 @app.command()
 @U.dataclass_cli
 def serve(args: ScriptArgs):
     """Serve the Tinker gateway (idles until clients connect)."""
+    recipe = args.recipe
     print(
-        f"[run] tinker gateway ({args.model_name}): {args.actor_num_gpus} train + {args.rollout_num_gpus} rollout GPUs, "
+        f"[run] tinker gateway ({recipe.hf_name}): {args.actor_num_gpus} train + {args.rollout_num_gpus} rollout GPUs, "
         f"{args.n_adapters} adapter slots, port {args.tinker_port}"
     )
 
@@ -78,7 +93,7 @@ def serve(args: ScriptArgs):
     )
 
     tinker_args = (
-        f"--tinker-server-port {args.tinker_port} --tinker-base-model {args.tinker_base_model} "
+        f"--tinker-server-port {args.tinker_port} --tinker-base-model Qwen/{recipe.hf_name} "
         f"--tinker-checkpoint-root {args.save_dir}/{args.run_id}"
     )
 
@@ -89,13 +104,16 @@ def serve(args: ScriptArgs):
     # initial config only; AdamParams come per optim_step request
     optimizer_args = "--optimizer adam --lr 1e-4 "
 
-    # bshd + micro-batch 1: megatron-core GatedDeltaNet rejects packed (thd) sequences, so no dynamic batching
+    batching_args = (
+        "--qkv-format bshd --micro-batch-size 1 " if recipe.bshd else "--use-dynamic-batch-size "
+    ) + f"--max-tokens-per-gpu {args.max_tokens_per_gpu} "
+
     perf_args = (
-        f"--tensor-model-parallel-size {args.tp} --sequence-parallel "
+        f"--tensor-model-parallel-size {recipe.tp} --sequence-parallel "
         "--pipeline-model-parallel-size 1 --context-parallel-size 1 "
-        f"--expert-model-parallel-size {args.ep} --expert-tensor-parallel-size 1 "
+        f"--expert-model-parallel-size {recipe.ep} --expert-tensor-parallel-size 1 "
         "--recompute-granularity full --recompute-method uniform --recompute-num-layers 1 "
-        f"--qkv-format bshd --micro-batch-size 1 --max-tokens-per-gpu {args.max_tokens_per_gpu} "
+        f"{batching_args}"
     )
 
     sglang_args = (
@@ -120,7 +138,7 @@ def serve(args: ScriptArgs):
         train_args=train_args,
         config=args,
         num_gpus_per_node=args.num_gpus_per_node,
-        megatron_model_type=args.model_type,
+        megatron_model_type=recipe.model_type,
         train_script="serve_tinker.py",
         megatron_path=args.megatron_path,
     )
