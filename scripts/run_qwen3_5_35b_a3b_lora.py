@@ -34,6 +34,7 @@ from typing import Literal
 import typer
 
 import miles.utils.external_utils.command_utils as U
+from miles.utils.lora import qwen3_5_lora_target_modules
 
 app = typer.Typer()
 
@@ -47,20 +48,8 @@ _MEGATRON_MODEL_TYPE = {
     "Qwen3.6-35B-A3B": "qwen3.6-35B-A3B_lora",
 }
 
-# Anchored below decoder.layers: keeps LoRA off the MTP block and the vision tower.
-_LAYERS = "language_model.decoder.layers.*"
-_DEFAULT_TARGET_MODULES = ",".join(
-    [
-        f"{_LAYERS}.self_attention.linear_qkv",
-        f"{_LAYERS}.self_attention.linear_proj",
-        f"{_LAYERS}.mlp.experts.linear_fc1",
-        f"{_LAYERS}.mlp.experts.linear_fc2",
-        f"{_LAYERS}.mlp.shared_experts.linear_fc1",
-        f"{_LAYERS}.mlp.shared_experts.linear_fc2",
-        f"{_LAYERS}.self_attention.in_proj",
-        f"{_LAYERS}.self_attention.out_proj",
-    ]
-)
+# Anchored below decoder.layers: keeps LoRA off the MTP block and the vision tower (shared with the Tinker gateway).
+_DEFAULT_TARGET_MODULES = ",".join(qwen3_5_lora_target_modules(moe=True))
 
 
 @dataclass

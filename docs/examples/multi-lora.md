@@ -6,7 +6,7 @@ description: "Serve concurrent LoRA fine-tuning clients on one shared base model
 > **Read the docs:** [Multi-LoRA training](https://miles.radixark.com/docs/advanced/lora#multi-lora-training).
 
 - `serve_qwen3_30b_a3b_tinker.py`: prepare Qwen3-30B-A3B and launch the gateway.
-- `serve_tinker_gateway.py`: the same gateway with `--model` selecting the base model (`qwen3_30b_a3b`, `qwen3_5_35b_a3b`, `qwen3_6_35b_a3b`). Qwen3.5/3.6 (hybrid GDN + MoE) run one unpacked sequence per micro-batch (`--qkv-format bshd --micro-batch-size 1`), per-expert adapters, LoRA on attention, GDN in/out projections, routed and shared experts and the output layer, off the MTP block.
+- Other base models use the same launcher with the model definition from `scripts/models/`, e.g. Qwen3.5-35B-A3B: `serve --model-type qwen3.5-35B-A3B_lora --hf-checkpoint <dir>/Qwen3.5-35B-A3B --extra-args "--tinker-base-model Qwen/Qwen3.5-35B-A3B"`. The gateway derives the LoRA layout from the HF config (Qwen3.5/3.6: attention, GDN in/out projections, routed and shared experts, output layer, off the MTP block) and, for GatedDeltaNet models, switches the trainer to one unpacked sequence per micro-batch (`--qkv-format bshd --micro-batch-size 1`, since megatron-core rejects packed sequences there).
 - `run_multi_tenant_example.py`: check marker memorization for one client or adapter isolation across concurrent tenants.
 
 ## Layout

@@ -29,6 +29,39 @@ def lora_base_cpu_backup_enabled(args: Namespace) -> bool:
     return is_lora_enabled(args) and getattr(args, "colocate", False) and getattr(args, "lora_base_cpu_backup", False)
 
 
+# Qwen3.5 / 3.6 (hybrid GDN + MoE behind a VL wrapper, plus an MTP block): Megatron-anchored patterns keep the adapters
+# off the MTP block (no adapter export mapping) and the vision tower; the pattern leaves map to the HF names SGLang
+# serves (in_proj -> in_proj_qkvz + in_proj_ba). Shared by scripts/run_qwen3_5_35b_a3b_lora.py and the Tinker gateway.
+QWEN3_5_LAYERS = "language_model.decoder.layers.*"
+QWEN3_5_ATTENTION_TARGETS = (
+    f"{QWEN3_5_LAYERS}.self_attention.linear_qkv",
+    f"{QWEN3_5_LAYERS}.self_attention.linear_proj",
+)
+QWEN3_5_GDN_TARGETS = (f"{QWEN3_5_LAYERS}.self_attention.in_proj", f"{QWEN3_5_LAYERS}.self_attention.out_proj")
+QWEN3_5_MOE_MLP_TARGETS = tuple(
+    f"{QWEN3_5_LAYERS}.mlp.{leaf}"
+    for leaf in ("experts.linear_fc1", "experts.linear_fc2", "shared_experts.linear_fc1", "shared_experts.linear_fc2")
+)
+QWEN3_5_DENSE_MLP_TARGETS = (f"{QWEN3_5_LAYERS}.mlp.linear_fc1", f"{QWEN3_5_LAYERS}.mlp.linear_fc2")
+QWEN3_5_OUTPUT_TARGET = "language_model.output_layer"
+
+
+def qwen3_5_lora_target_modules(
+    *, moe: bool, train_attn: bool = True, train_mlp: bool = True, train_unembed: bool = False
+) -> list[str]:
+    """LoRA targets for Qwen3.5/3.6 by module group: attention + GDN projections, routed/shared (or dense) MLP, output layer."""
+    modules: list[str] = []
+    if train_attn:
+        modules.extend(QWEN3_5_ATTENTION_TARGETS)
+    if train_mlp:
+        modules.extend(QWEN3_5_MOE_MLP_TARGETS if moe else QWEN3_5_DENSE_MLP_TARGETS)
+    if train_attn:
+        modules.extend(QWEN3_5_GDN_TARGETS)
+    if train_unembed:
+        modules.append(QWEN3_5_OUTPUT_TARGET)
+    return modules
+
+
 def save_adapter_to_disk(out_dir, config: dict, tensors: dict) -> None:
     """Write a LoRA adapter dir (adapter_config.json + adapter_model.safetensors)."""
     import safetensors.torch  # lazy: this module is imported on paths that never touch weights

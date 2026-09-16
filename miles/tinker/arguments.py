@@ -1,6 +1,10 @@
 import argparse
+import logging
 
 from miles.utils.hf_config import load_hf_config
+from miles.utils.lora import qwen3_5_lora_target_modules
+
+logger = logging.getLogger(__name__)
 
 
 def add_tinker_arguments(parser):
@@ -36,19 +40,42 @@ def configure_tinker_args(args):
     assert (
         args.target_modules is None and args.exclude_modules is None
     ), "Tinker uses --tinker-train-attn/mlp/unembed; --target-modules and --exclude-modules are not supported"
+    hf_config = load_hf_config(args.hf_checkpoint)
     modules = _resolve_target_modules(
-        load_hf_config(args.hf_checkpoint),
+        hf_config,
         train_attn=args.tinker_train_attn,
         train_mlp=args.tinker_train_mlp,
         train_unembed=args.tinker_train_unembed,
     )
     # The common LoRA validator parses and validates this before trainer/engine initialization.
     args.target_modules = ",".join(modules)
+    _configure_gdn_batching(args, hf_config)
+
+
+def _configure_gdn_batching(args, hf_config):
+    """GatedDeltaNet models (Qwen3.5/3.6, Qwen3-Next): megatron-core rejects packed (thd) sequences, so train one unpacked sequence per micro-batch; multi-LoRA accepts exactly that shape."""
+    text_config = getattr(hf_config, "text_config", None) or hf_config
+    if "linear_attention" not in (getattr(text_config, "layer_types", None) or ()):
+        return
+    if args.qkv_format != "bshd" or args.micro_batch_size != 1 or args.use_dynamic_batch_size:
+        logger.info(
+            "GatedDeltaNet model: using --qkv-format bshd --micro-batch-size 1 without --use-dynamic-batch-size"
+        )
+    args.qkv_format = "bshd"
+    args.micro_batch_size = 1
+    args.use_dynamic_batch_size = False
 
 
 def _resolve_target_modules(hf_config, *, train_attn, train_mlp, train_unembed):
     if hf_config.model_type in ("qwen3_5", "qwen3_5_moe"):
-        return _resolve_qwen3_5_target_modules(train_attn=train_attn, train_mlp=train_mlp, train_unembed=train_unembed)
+        modules = qwen3_5_lora_target_modules(
+            moe=hf_config.model_type == "qwen3_5_moe",
+            train_attn=train_attn,
+            train_mlp=train_mlp,
+            train_unembed=train_unembed,
+        )
+        assert modules, "Tinker requires at least one trainable LoRA module group"
+        return modules
     # Other architectures need their own complete attention/MLP mapping.
     assert hf_config.model_type in (
         "qwen3",
@@ -61,35 +88,5 @@ def _resolve_target_modules(hf_config, *, train_attn, train_mlp, train_unembed):
         modules.extend(("gate_proj", "up_proj", "down_proj"))
     if train_unembed:
         modules.append("lm_head")
-    assert modules, "Tinker requires at least one trainable LoRA module group"
-    return modules
-
-
-# Qwen3.5 / 3.6 (hybrid GDN + MoE behind a VL wrapper, plus an MTP block): Megatron-anchored patterns like
-# scripts/run_qwen3_5_35b_a3b_lora.py, so adapters stay off the MTP block (no adapter export mapping) and the
-# vision tower; the pattern leaves map to the HF names SGLang serves (in_proj -> in_proj_qkvz + in_proj_ba).
-_QWEN3_5_LAYERS = "language_model.decoder.layers.*"
-
-
-def _resolve_qwen3_5_target_modules(*, train_attn, train_mlp, train_unembed):
-    modules = []
-    if train_attn:  # full-attention layers and the GDN layers' fused in_proj / out_proj
-        modules.extend(
-            f"{_QWEN3_5_LAYERS}.self_attention.{leaf}" for leaf in ("linear_qkv", "linear_proj", "in_proj", "out_proj")
-        )
-    if train_mlp:  # routed experts, the shared expert, and the dense MLP of the dense Qwen3.5 sizes
-        modules.extend(
-            f"{_QWEN3_5_LAYERS}.mlp.{leaf}"
-            for leaf in (
-                "experts.linear_fc1",
-                "experts.linear_fc2",
-                "shared_experts.linear_fc1",
-                "shared_experts.linear_fc2",
-                "linear_fc1",
-                "linear_fc2",
-            )
-        )
-    if train_unembed:
-        modules.append("language_model.output_layer")
     assert modules, "Tinker requires at least one trainable LoRA module group"
     return modules
